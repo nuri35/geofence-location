@@ -31,7 +31,7 @@ response envelope. No domain modules or business logic exist yet.
 cp .env.example .env        # defaults work with the compose services as-is
 docker compose up -d        # PostGIS + Redis with healthchecks
 npm install
-npm run migration:run       # no-op until the first migration exists
+npm run migration:run       # applies migrations (first one enables the PostGIS extension)
 npm run start:dev
 ```
 
@@ -76,9 +76,9 @@ src/
 │   └── dto/                 # empty, reserved
 ├── health/                  # GET /health (Terminus, db ping)
 ├── redis/                   # global ioredis provider (REDIS_CLIENT token)
-└── migrations/              # TypeORM migrations (empty)
+└── migrations/              # TypeORM migrations (0001 enables the PostGIS extension)
 test/                        # e2e specs + jest e2e config
-docker/postgres/init.sql     # CREATE EXTENSION postgis on first boot
+docs/ADR/                    # architecture decision records
 ```
 
 ## Environment variables
