@@ -21,16 +21,19 @@ describe('Health (e2e)', () => {
     await app.close();
   });
 
-  it('GET /health reports the database as up inside the response envelope', async () => {
+  it('GET /health returns the raw Terminus payload without the response envelope', async () => {
     const response = await request(app.getHttpServer()).get('/health').expect(200);
 
     const body = response.body as {
-      statusCode: number;
-      timestamp: string;
-      data: { status: string; info: Record<string, { status: string }> };
+      status: string;
+      info: Record<string, { status: string }>;
+      error: Record<string, unknown>;
+      details: Record<string, { status: string }>;
     };
-    expect(body.statusCode).toBe(200);
-    expect(body.data.status).toBe('ok');
-    expect(body.data.info.database.status).toBe('up');
+    expect(body.status).toBe('ok');
+    expect(body.info.database.status).toBe('up');
+    expect(body.details.database.status).toBe('up');
+    expect(body).not.toHaveProperty('data');
+    expect(body).not.toHaveProperty('statusCode');
   });
 });

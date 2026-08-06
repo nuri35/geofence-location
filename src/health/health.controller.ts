@@ -8,9 +8,12 @@ import {
   TypeOrmHealthIndicator,
 } from '@nestjs/terminus';
 
+import { SkipResponseTransform } from '@app/common/decorators';
+
 import { HEALTH_INDICATOR_DATABASE } from './health.constants';
 
 @ApiTags('health')
+@SkipResponseTransform()
 @Controller('health')
 export class HealthController {
   constructor(

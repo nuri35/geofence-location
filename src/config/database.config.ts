@@ -1,6 +1,7 @@
 import { registerAs } from '@nestjs/config';
 
-import { ConfigNamespace } from './config.constants';
+import { ConfigNamespace, EnvKey } from './config.constants';
+import { requireEnv } from './env.util';
 
 export interface DatabaseConfig {
   host: string;
@@ -11,9 +12,9 @@ export interface DatabaseConfig {
 }
 
 export const databaseConfig = registerAs(ConfigNamespace.Database, (): DatabaseConfig => ({
-  host: process.env.POSTGRES_HOST ?? 'localhost',
-  port: parseInt(process.env.POSTGRES_PORT ?? '5432', 10),
-  username: process.env.POSTGRES_USER ?? 'geofence',
-  password: process.env.POSTGRES_PASSWORD ?? 'geofence',
-  database: process.env.POSTGRES_DB ?? 'geofence',
+  host: requireEnv(EnvKey.PostgresHost),
+  port: parseInt(requireEnv(EnvKey.PostgresPort), 10),
+  username: requireEnv(EnvKey.PostgresUser),
+  password: requireEnv(EnvKey.PostgresPassword),
+  database: requireEnv(EnvKey.PostgresDb),
 }));

@@ -1,6 +1,7 @@
 import { registerAs } from '@nestjs/config';
 
-import { ConfigNamespace } from './config.constants';
+import { ConfigNamespace, EnvKey } from './config.constants';
+import { requireEnv } from './env.util';
 
 export interface RedisConfig {
   host: string;
@@ -9,7 +10,7 @@ export interface RedisConfig {
 }
 
 export const redisConfig = registerAs(ConfigNamespace.Redis, (): RedisConfig => ({
-  host: process.env.REDIS_HOST ?? 'localhost',
-  port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
-  password: process.env.REDIS_PASSWORD ?? '',
+  host: requireEnv(EnvKey.RedisHost),
+  port: parseInt(requireEnv(EnvKey.RedisPort), 10),
+  password: process.env[EnvKey.RedisPassword] ?? '',
 }));

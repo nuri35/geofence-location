@@ -37,10 +37,6 @@ npm run start:dev
 
 The API listens on `http://localhost:3000`. Health: `GET /health`. Swagger UI: `/docs`.
 
-Note: `start:prod` (`node dist/main`) does not resolve the `@app/*`/`@config/*`
-path aliases that `nest start` handles in development; wire up a resolver (or a
-bundler) before shipping a production build.
-
 ## Scripts
 
 | Script                   | Purpose                                             |
@@ -83,15 +79,18 @@ docs/ADR/                    # architecture decision records
 
 ## Environment variables
 
-| Variable            | Default     | Description                                  |
-| ------------------- | ----------- | -------------------------------------------- |
-| `NODE_ENV`          | `development` | `development` \| `test` \| `production`    |
-| `PORT`              | `3000`      | HTTP port                                    |
-| `POSTGRES_HOST`     | `localhost` | Postgres host                                |
-| `POSTGRES_PORT`     | `5432`      | Postgres port (also used by compose mapping) |
-| `POSTGRES_USER`     | `geofence`  | Postgres user                                |
-| `POSTGRES_PASSWORD` | `geofence`  | Postgres password                            |
-| `POSTGRES_DB`       | `geofence`  | Database name                                |
-| `REDIS_HOST`        | `localhost` | Redis host                                   |
-| `REDIS_PORT`        | `6379`      | Redis port (also used by compose mapping)    |
-| `REDIS_PASSWORD`    | *(empty)*   | Redis password; empty disables auth          |
+Required variables have no fallback — the app refuses to start if one is missing.
+`cp .env.example .env` provides working values for the compose services.
+
+| Variable            | Required | Default       | Description                                  |
+| ------------------- | -------- | ------------- | -------------------------------------------- |
+| `NODE_ENV`          | no       | `development` | `development` \| `test` \| `production`      |
+| `PORT`              | no       | `3000`        | HTTP port                                    |
+| `POSTGRES_HOST`     | yes      | —             | Postgres host                                |
+| `POSTGRES_PORT`     | yes      | —             | Postgres port (also used by compose mapping) |
+| `POSTGRES_USER`     | yes      | —             | Postgres user                                |
+| `POSTGRES_PASSWORD` | yes      | —             | Postgres password                            |
+| `POSTGRES_DB`       | yes      | —             | Database name                                |
+| `REDIS_HOST`        | yes      | —             | Redis host                                   |
+| `REDIS_PORT`        | yes      | —             | Redis port (also used by compose mapping)    |
+| `REDIS_PASSWORD`    | no       | *(empty)*     | Redis password; empty disables auth          |
