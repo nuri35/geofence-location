@@ -136,7 +136,8 @@ async function withPgSampling(promise) {
   clearInterval(timer);
   const num = (k) => samples.map((s) => Number(s[k]));
   const max = (k) => (samples.length ? Math.max(...num(k)) : 0);
-  const avg = (k) => (samples.length ? +(num(k).reduce((a, b) => a + b, 0) / samples.length).toFixed(2) : 0);
+  const avg = (k) =>
+    samples.length ? +(num(k).reduce((a, b) => a + b, 0) / samples.length).toFixed(2) : 0;
   return {
     ...result,
     pool: {
@@ -182,7 +183,10 @@ const diffRedis = (before, after) => {
     const usec = (after.cmd[name]?.usec ?? 0) - (before.cmd[name]?.usec ?? 0);
     if (calls > 0) cmdDelta[name] = { calls, usecPerCall: +(usec / calls).toFixed(1) };
   }
-  return { hitRate: hits + misses > 0 ? +(hits / (hits + misses)).toFixed(3) : null, cmd: cmdDelta };
+  return {
+    hitRate: hits + misses > 0 ? +(hits / (hits + misses)).toFixed(3) : null,
+    cmd: cmdDelta,
+  };
 };
 
 async function setupState() {

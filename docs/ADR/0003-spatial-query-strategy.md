@@ -40,6 +40,14 @@ cost roughly flat instead of linear in N. **A measurement of the real query
 shape (one point vs N polygons, `EXPLAIN ANALYZE` showing `Index Cond`) is owed
 in Phase 1** and belongs in that migration's verification trail.
 
+> **Verification note (2026-08-07, Phase 1)** — real plan of the application's
+> query, 10 polygons seeded:
+> `Index Scan using idx_areas_boundary … Index Cond: (boundary ~ point) …
+> Execution Time: 0.160 ms`. The support function rewrote `ST_Covers` into the
+> bbox operator plus recheck — the query shape is index-rewritable as §5 of the
+> postgis-spatial skill predicts. At-scale behaviour remains covered by the
+> Phase 4 measurement items.
+
 ## Alternatives considered
 
 - **Application-layer point-in-polygon** (polygons cached in process behind an

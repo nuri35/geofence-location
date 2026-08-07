@@ -120,7 +120,7 @@ all three places:
 Column declaration:
 
 ```ts
-import { Polygon, Point } from 'geojson'; // needs geojson types — NOT installed yet (unverified in this repo)
+import { Polygon, Point } from 'geojson'; // @types/geojson — installed (devDependency since Phase 1)
 
 @Column({ type: 'geometry', spatialFeatureType: 'Polygon', srid: 4326 })
 area: Polygon;

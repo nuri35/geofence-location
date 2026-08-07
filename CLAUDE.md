@@ -76,6 +76,8 @@ Prohibitions. Breaking one is a bug even if everything is green.
 - No polygon is stored without passing `ST_IsValid`; the 400 response carries `ST_IsValidReason`. Never auto-repair user input with `ST_MakeValid`. (`postgis-spatial` §7)
 - No polygon with more than 1000 vertices is accepted — enforced at the DTO layer with a clear 400.
 - Presence and log writes never happen outside a single transaction. (Decision 4)
+- The presence write path never uses `repository.save()` — its upsert-by-PK semantics would silently UPDATE an existing membership and defeat the `ON CONFLICT` arbiter. Raw SQL through the transaction's manager only. (ADR 0002)
+- The presence cache, when active, is consulted, populated, and invalidated only under the advisory lock, inside the transaction; only a clean miss may write back. (ADR 0002, cache-under-lock)
 - Redis is never consulted to decide what gets logged, and never written before the owning transaction commits. (Decision 6)
 - No localhost HTTP verification is trusted without first checking which process owns the port. (`testing-verification`)
 

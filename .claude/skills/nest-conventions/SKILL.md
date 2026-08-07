@@ -65,8 +65,9 @@ through class-validator's `string[]` untouched.
 
 ## DTO validation
 
-The global `ValidationPipe` in src/main.ts runs with `whitelist: true`,
-`forbidNonWhitelisted: true`, `transform: true`. Consequences for every DTO you
+The global `ValidationPipe` is provided as `APP_PIPE` in src/app.module.ts (moved
+from main.ts in Phase 2A so e2e harnesses get the exact production pipe) and runs
+with `whitelist: true`, `forbidNonWhitelisted: true`, `transform: true`. Consequences for every DTO you
 write: a request field without a decorated DTO property is a **400, not silently
 stripped**; DTO instances are real class instances (`transform`), so
 `@Type(() => Number)` etc. work. `src/common/dto/` is the home for shared DTOs

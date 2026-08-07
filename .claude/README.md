@@ -52,8 +52,8 @@ its own; the table is for humans and for prompting it explicitly when it doesn't
   (Earlier versions said no CLAUDE.md existed by design — that changed in
   Phase 0.)
 - **No lint/format hook on file edits.** Measured on this machine: type-checked
-  ESLint takes ~6 s warm and ~60 s cold even for one file. Per-edit that is
-  unusable; lint runs once per change-set instead.
+  ESLint takes ~6 s warm, ~13 s cold (~60 s before the repo left OneDrive) even
+  for one file. Per-edit that is unusable; lint runs once per change-set instead.
 - **No migration-vs-database hook.** Checking whether an edited migration was
   *actually executed* requires a live DB query per edit and fails when Docker is
   down — a hook that blocks unrelated work. The cheap proxy (warn on edits to

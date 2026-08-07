@@ -31,9 +31,18 @@ Jest 29 + ts-jest, Supertest 7. Two suites with different trust models.
   the envelope (`not.toHaveProperty('data')`) — because the envelope wrongly
   wrapping health was a real regression class here. When an endpoint's shape is
   part of a contract, assert what must NOT be there too.
-- e2e currently shares the dev database. Fine while tests only read; the first
-  test that writes rows needs its own database (create from `template_postgis` so
-  PostGIS comes along).
+- e2e runs against a **dedicated `geofence_test` database**, dropped, recreated and
+  migrated per run by test/global-setup.ts (the real migration chain guarantees
+  PostGIS — not `template_postgis`, which is an image-specific artifact);
+  test/setup-env.ts points the app's config at it. The dev database is never
+  touched by tests. New migrations must be added to the explicit MIGRATIONS list
+  in global-setup.ts — a missing table in e2e is the reminder.
+- The full suite runs under any presence-read strategy via
+  `PRESENCE_READ_STRATEGY` (default: folded, ADR 0007). The Redis-down
+  verification is `docker compose stop redis` + the locations/areas suites under
+  the cache strategy — real container stop, not mocks. Known nuisance: with Redis
+  down, Jest may warn "worker failed to exit gracefully" (ioredis reconnect-timer
+  race at teardown); flaky, cosmetic, does not affect results.
 
 ## The full green chain
 
@@ -41,7 +50,7 @@ A change is green when ALL of these pass, in this order:
 
 ```bash
 npm run build        # nest build + tsc-alias (prod path-alias rewrite)
-npm run lint         # type-checked ESLint; ~6 s warm, up to ~60 s cold (measured)
+npm run lint         # type-checked ESLint; ~6 s warm, ~13 s cold (re-measured after the repo left OneDrive; was ~60 s there)
 npm test
 npm run test:e2e     # needs compose up + healthy
 docker compose ps    # both containers "(healthy)"

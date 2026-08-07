@@ -11,6 +11,22 @@ Response contracts are decided: `POST /locations` returns 201 with
 and validation failures are 400 (CLAUDE.md hard constraints). Scenarios assert
 observable state throughout; scenario 13 asserts the response body itself.
 
+## Scenario → test map
+
+| # | Proven by |
+| --- | --- |
+| 1–8 | `test/locations.e2e-spec.ts` — test names carry the scenario number verbatim (e.g. "4. logs a second entry after exit and re-entry"; 8 is the 20-way concurrent race) |
+| 9 | `test/locations.e2e-spec.ts` — "9. persists observedAt verbatim without letting it affect the outcome" |
+| 10 | Runtime verification, not a fixed spec: `docker compose stop redis` + the locations/areas suites under `PRESENCE_READ_STRATEGY=cache` (24 tests green with Redis dead, recorded in the Phase 3 verification); cache observables in `test/presence-cache.e2e-spec.ts` |
+| 11 | `test/areas.e2e-spec.ts` — "rejects a self-intersecting bowtie with 400 carrying ST_IsValidReason, storing nothing" + "rejects an unclosed ring with 400 at the DTO layer" |
+| 12 | `test/locations.e2e-spec.ts` — "12. rejects out-of-range coordinates and oversized userId with 400"; `test/areas.e2e-spec.ts` — "rejects out-of-range coordinates with 400" |
+| 13 | `test/locations.e2e-spec.ts` — "13. returns 201 naming exactly the areas entered, then an empty array" |
+| 14 | `test/areas.e2e-spec.ts` — "rejects 1001 distinct vertices and accepts 1000" |
+
+Beyond the scenarios, `test/locations.e2e-spec.ts` also proves the cascade
+(area delete removes presence and log rows) and transactionality (a forced
+mid-transaction failure rolls back the presence write).
+
 ## 1. logs nothing for a user outside all areas
 
 - **Setup**: one area A. User U has no prior state.

@@ -97,6 +97,22 @@ per-user bucket (`@nestjs/throttler` backed by the Redis already in the stack,
 or at the gateway). Deferred with the rest of the abuse surface, behind the
 missing authentication.
 
+## Observations from load testing — known and unaddressed
+
+Not scope decisions but facts surfaced by the ADR 0007 measurement
+(docs/PRESENCE_READ_MEASUREMENT.md) that a future phase must own:
+
+- **Multi-second transaction stalls** (1.5–4.8 s max transaction age) recur in
+  write-heavy load under every read strategy — strategy-independent, enough to
+  destroy any run's p99. Checkpoint logs look healthy; WSL2/Docker WAL-fsync
+  latency spikes are the prime suspect. Unaddressed because diagnosis needs
+  config changes (`log_min_duration_statement`, possibly `statement_timeout`)
+  that were out of bounds during measurement; both are Phase 4 items.
+- **`/health` performs a real database ping and Redis ping per call**,
+  unauthenticated, plateauing at ~1k req/s on the reference box — an
+  amplification target. Unaddressed because rate limiting as a whole is a
+  non-goal (above); recorded so the token-bucket work covers it when it comes.
+
 ## Antimeridian and pole-crossing polygons
 
 `geometry` with SRID 4326 does planar math in degrees: a polygon spanning the
