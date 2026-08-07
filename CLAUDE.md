@@ -56,12 +56,13 @@ Numbered, append-only. One or two sentences here; the reasoning lives in the ADR
 5. A user may be inside multiple overlapping areas simultaneously; a transition is a set difference, not a single value. — [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md)
 6. Redis is a read-through cache in front of presence — lazy loading, negative caching as a JSON string value (`"[]"` = known-empty, key absent = not cached), invalidated after commit rather than updated. Losing Redis costs latency, never correctness. — [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md)
 7. No queue: persistent log inserts are rare (~8/s average, ~170/s worst peak) and connection pool sizing covers spikes. — [ADR 0004](docs/ADR/0004-no-queue.md)
-8. `recorded_at` (server receive time) is authoritative for both ordering and the logged time. `observed_at` (client-reported, nullable) is stored for informational purposes only and participates in no logic — no rejection, no comparison, no state. — [ADR 0005](docs/ADR/0005-time-and-ordering-policy.md)
+8. `recorded_at` (server receive time) is authoritative for both ordering and the logged time. `observed_at` (client-reported, nullable) is stored on log rows only, for informational purposes, and participates in no logic — no rejection, no comparison, no state; there is no samples table, and a request that produces no entry stores nothing. — [ADR 0005](docs/ADR/0005-time-and-ordering-policy.md)
 9. First observation of a user already inside an area is recorded as an entry — an accepted assumption, not an observed transition. — [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md)
 10. Concurrent requests for the same user are serialized by `pg_advisory_xact_lock(hashtext(user_id))` as the first statement of the write transaction; `ON CONFLICT` stays as the correctness backstop. — [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md)
 11. `POST /locations` returns 201 with a body naming the entries it produced — `{ enteredAreaIds: [...] }`, empty array when nothing happened — delivered inside the standard response envelope (`nest-conventions`).
 12. `GET /logs` uses keyset pagination with a cursor over `(recorded_at, id)` and filters `userId`, `areaId`, `from`, `to`; offset pagination is rejected because it skips and duplicates rows under concurrent inserts on an append-only table. — [ADR 0006](docs/ADR/0006-read-endpoint-pagination.md)
 13. `GET /areas` returns full geometry as GeoJSON with plain `limit`/`offset` — acceptable because the table is small and nearly static; the two read endpoints differ by decision, not accident. — [ADR 0006](docs/ADR/0006-read-endpoint-pagination.md)
+14. `user_id` is `varchar(64)` — free-form, since auth is a non-goal (identity is a claim, not a verified fact), but bounded so the column and the advisory-lock hash have a defined input.
 
 ## Hard constraints
 
@@ -84,7 +85,7 @@ The single source of truth for progress — phase documents carry no status fiel
 | Phase | Scope | Status |
 | --- | --- | --- |
 | 0 | Architecture decisions, scope, acceptance criteria | Complete |
-| 1 | Areas: table + migration + GIST index, `POST`/`GET /areas`, `ST_IsValid` gating, vertex cap; point-in-polygon query proven in isolation with `EXPLAIN ANALYZE` on the real query shape | Not started |
+| 1 | Areas: table + migration + GIST index, `POST`/`GET /areas`, `ST_IsValid` gating, vertex cap; point-in-polygon query proven in isolation with `EXPLAIN ANALYZE` on the real query shape | Complete |
 | 2 | Core (must not be cut): logs + `user_area_presence` tables, full `POST /locations` transition path — transaction + advisory lock + `ON CONFLICT` + exit-side deletion; every acceptance scenario becomes a test | Not started |
 | 3 | Redis read-through cache in front of presence + Redis health indicator. Explicitly cuttable — the architecture is correct without it | Not started |
 | 4 | `GET /logs` keyset pagination + its indexes, pool sizing, `statement_timeout`, load measurement with real numbers | Not started |

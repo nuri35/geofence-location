@@ -61,7 +61,10 @@ sequence numbers — per-device monotonic counters that need no trusted clock �
 rejected here because they change the client contract and a technical case has
 no real client to hold to it. A client-clock staleness guard was considered and
 dropped (ADR 0005, alternatives): it defended against this case badly, at the
-price of per-user state and cross-clock comparisons.
+price of per-user state and cross-clock comparisons. Related retention fact:
+`observed_at` is persisted on entry log rows only (decision 8) — there is no
+samples table and there will not be one, so a request that produces no entry
+stores nothing and full location traces are simply not retained.
 
 ## Log retention and partitioning
 

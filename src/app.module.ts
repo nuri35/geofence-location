@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { AreasModule } from '@app/areas/areas.module';
 import { HttpExceptionFilter } from '@app/common/filters';
 import { ResponseTransformInterceptor } from '@app/common/interceptors';
 import { HealthModule } from '@app/health/health.module';
@@ -27,6 +28,7 @@ import { typeOrmModuleFactory } from '@config/typeorm.config';
       inject: [databaseConfig.KEY],
       useFactory: typeOrmModuleFactory,
     }),
+    AreasModule,
     RedisModule,
     HealthModule,
   ],

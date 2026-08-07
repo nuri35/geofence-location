@@ -9,5 +9,7 @@
   "moduleNameMapper": {
     "^@app/(.*)$": "<rootDir>/../src/$1",
     "^@config/(.*)$": "<rootDir>/../src/config/$1"
-  }
+  },
+  "globalSetup": "<rootDir>/global-setup.ts",
+  "setupFiles": ["<rootDir>/setup-env.ts"]
 }
