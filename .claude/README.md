@@ -44,9 +44,13 @@ its own; the table is for humans and for prompting it explicitly when it doesn't
 
 ## Deliberately NOT here
 
-- **No CLAUDE.md.** The skills carry the conventions with better targeting; a
-  CLAUDE.md would either duplicate them or drift from them. If one appears later
-  it should be a pointer to this file, not a second source of truth.
+- **No duplication with CLAUDE.md.** Since Phase 0 a CLAUDE.md exists at the
+  repo root, and the division is deliberate: skills carry conventions ("how"),
+  CLAUDE.md carries decisions and project state ("what we chose and why" —
+  scope, numbered decisions pointing at ADRs, phase status, session protocol).
+  Neither restates the other; this file remains the tooling onboarding doc.
+  (Earlier versions said no CLAUDE.md existed by design — that changed in
+  Phase 0.)
 - **No lint/format hook on file edits.** Measured on this machine: type-checked
   ESLint takes ~6 s warm and ~60 s cold even for one file. Per-edit that is
   unusable; lint runs once per change-set instead.
