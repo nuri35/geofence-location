@@ -7,6 +7,7 @@ import { AreasModule } from '@app/areas/areas.module';
 import { HttpExceptionFilter } from '@app/common/filters';
 import { ResponseTransformInterceptor } from '@app/common/interceptors';
 import { HealthModule } from '@app/health/health.module';
+import { LocationsModule } from '@app/locations/locations.module';
 import { RedisModule } from '@app/redis/redis.module';
 import { appConfig } from '@config/app.config';
 import { databaseConfig } from '@config/database.config';
@@ -29,6 +30,7 @@ import { typeOrmModuleFactory } from '@config/typeorm.config';
       useFactory: typeOrmModuleFactory,
     }),
     AreasModule,
+    LocationsModule,
     RedisModule,
     HealthModule,
   ],
