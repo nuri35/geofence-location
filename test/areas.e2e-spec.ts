@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -60,10 +60,7 @@ describe('Areas (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    // Mirror main.ts: the global pipe is registered at bootstrap, not in AppModule.
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
-    );
+    // No manual pipe: AppModule provides APP_PIPE, so this harness validates exactly as prod does.
     await app.init();
     areasService = app.get(AreasService);
   });

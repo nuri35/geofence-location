@@ -8,12 +8,19 @@ import { EnvKey } from '../src/config/config.constants';
 import { requireEnv } from '../src/config/env.util';
 import { EnablePostgisExtension1786038977187 } from '../src/migrations/1786038977187-EnablePostgisExtension';
 import { CreateAreasTable1786108207631 } from '../src/migrations/1786108207631-CreateAreasTable';
+import { CreateLogsTable1786110074569 } from '../src/migrations/1786110074569-CreateLogsTable';
+import { CreatePresenceTable1786110075607 } from '../src/migrations/1786110075607-CreatePresenceTable';
 import { E2E_DATABASE_NAME } from './e2e-constants';
 
 // Migrations are imported explicitly (no glob: transform contexts resolve globs
 // unreliably). A new migration must be added here — the e2e suite failing on a
 // missing table is the reminder.
-const MIGRATIONS = [EnablePostgisExtension1786038977187, CreateAreasTable1786108207631];
+const MIGRATIONS = [
+  EnablePostgisExtension1786038977187,
+  CreateAreasTable1786108207631,
+  CreateLogsTable1786110074569,
+  CreatePresenceTable1786110075607,
+];
 
 const provisionE2eDatabase = async (): Promise<void> => {
   config();

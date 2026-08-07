@@ -16,8 +16,8 @@ coverage/
 # claude code - personal settings stay local
 .claude/settings.local.json
 
-# logs
-logs/
+# logs (runtime output at repo root only — src/logs/ is a source module)
+/logs/
 *.log
 npm-debug.log*
 
