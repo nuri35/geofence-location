@@ -13,6 +13,9 @@ coverage/
 .env.local
 .env.*.local
 
+# claude code - personal settings stay local
+.claude/settings.local.json
+
 # logs
 logs/
 *.log

@@ -1,0 +1,103 @@
+---
+name: nest-conventions
+description: Use when adding or changing any NestJS building block in this repo — module, controller, provider, DTO, filter, interceptor, decorator — or any code that needs configuration values. Codifies the config-access rule, the response envelope and its escape hatch, and the lint rules that have actually failed builds here.
+---
+
+# NestJS conventions as practiced in this repo
+
+Grounded in the actual source at the cited paths. NestJS 11.1.28, Express 5,
+TypeScript 5.9 strict (verified via `npm ls` and tsconfig).
+
+## Layout and boundaries
+
+```
+src/config/     the ONLY place allowed to read process.env (see below)
+src/common/     cross-cutting: filters/, interceptors/, decorators/, dto/ — each with an index.ts barrel
+src/health/     GET /health (Terminus) — pattern for a feature module: *.module.ts + *.controller.ts + *.constants.ts
+src/redis/      global provider module — pattern for wrapping an external client
+src/migrations/ TypeORM migrations (see typeorm-migrations skill)
+```
+
+Feature modules own their constants file (`health.constants.ts`,
+`redis.constants.ts`). No magic strings: string-y identifiers live in enums or
+exported constants — existing ones are `ConfigNamespace`, `EnvKey`,
+`NodeEnvironment` (src/config/config.constants.ts), `SWAGGER_PATH` (src/main.ts),
+`HEALTH_INDICATOR_DATABASE`, `REDIS_CLIENT` (a `Symbol`), and
+`SKIP_RESPONSE_TRANSFORM_KEY`.
+
+## The config rule (enforced by convention — check it in review)
+
+**Nothing outside `src/config/` touches `process.env`.** Verify with
+`grep -rn "process.env" src/ --include="*.ts"` — every hit must be under
+`src/config/`. Consumers get config three ways:
+
+1. Inject a namespace into a factory: `inject: [databaseConfig.KEY]` with
+   `(db: ConfigType<typeof databaseConfig>) => …` — see `TypeOrmModule.forRootAsync`
+   in src/app.module.ts and the provider factory in src/redis/redis.module.ts.
+2. `configService.getOrThrow<AppConfig>(ConfigNamespace.App)` — see src/main.ts.
+3. New env vars: add to `EnvKey`, to the Joi schema in src/config/env.validation.ts,
+   to `.env.example` (documented), and to the README env table. **Required vars get
+   `.required()` and NO default** — infra coordinates (all `POSTGRES_*`,
+   `REDIS_HOST`, `REDIS_PORT`) must never be guessed. Missing → boot aborts with
+   `Config validation error: "POSTGRES_PASSWORD" is required` (verified by removing
+   the var and booting). Only genuinely optional vars (`NODE_ENV`, `PORT`,
+   `REDIS_PASSWORD`) carry defaults. In factories, read required vars via
+   `requireEnv(EnvKey.X)` (src/config/env.util.ts) — it treats `''` as missing,
+   matching Joi.
+
+## Response envelope and its escape hatch
+
+`ResponseTransformInterceptor` is registered globally via `APP_INTERCEPTOR` in
+src/app.module.ts and wraps every controller response as
+`{ statusCode, timestamp, data }`. Two things it does NOT touch:
+
+- Routes decorated with `@SkipResponseTransform()` (class or method level) — read
+  via `Reflector.getAllAndOverride(SKIP_RESPONSE_TRANSFORM_KEY, [handler, class])`.
+  `HealthController` uses it because monitors/probes depend on the raw Terminus
+  shape; any future endpoint with an external contract (webhooks, metrics) gets the
+  same decorator, never a path check inside the interceptor.
+- `/docs` — Swagger is served by middleware, so interceptors never applied to it.
+
+`HttpExceptionFilter` (global via `APP_FILTER`) shapes error responses as
+`{ statusCode, timestamp, path, message }`. It catches `HttpException` only —
+non-HTTP throws fall through to Nest's default 500 handler. `message` passes
+through class-validator's `string[]` untouched.
+
+## DTO validation
+
+The global `ValidationPipe` in src/main.ts runs with `whitelist: true`,
+`forbidNonWhitelisted: true`, `transform: true`. Consequences for every DTO you
+write: a request field without a decorated DTO property is a **400, not silently
+stripped**; DTO instances are real class instances (`transform`), so
+`@Type(() => Number)` etc. work. `src/common/dto/` is the home for shared DTOs
+(currently empty by design).
+
+## Path aliases
+
+`@app/*` → `src/*`, `@config/*` → `src/config/*` (tsconfig paths). They work in
+`nest start`, Jest (`moduleNameMapper` in package.json + test/jest-e2e.json), and
+production builds — `npm run build` runs `tsc-alias` after `nest build` to rewrite
+them in dist/ (verified: `dist/app.module.js` contains `require("./common/filters")`).
+Convention: aliases for cross-folder imports, relative paths within a folder
+(e.g. `../decorators` inside common/). If you change the build script, re-verify
+with `node dist/main` — plain tsc does NOT rewrite paths.
+
+## Lint rules that have actually broken this build
+
+ESLint 9 flat config (eslint.config.mjs), type-checked, with four explicit rules.
+Real failures fixed in this repo — write code that avoids them upfront:
+
+- `explicit-function-return-type` fires on **inline arrows**, including Terminus
+  indicator callbacks and test mocks. Fix pattern:
+  `(): Promise<HealthIndicatorResult> => this.db.pingCheck(...)`.
+- `no-unsafe-member-access` fires on `SomeClass.prototype.x` because `prototype`
+  is `any` on a bare constructor type — declare an interface with a typed
+  `prototype` (see response-transform.interceptor.spec.ts).
+- `require-await` (from recommendedTypeChecked) rejects `async` methods with no
+  `await` — a deliberately-empty lifecycle method returns `Promise.resolve()`
+  instead (see the migration `down()` in src/migrations/).
+- `tsconfig` has `noUnusedLocals`/`noUnusedParameters` — omit unused params
+  entirely (interfaces are structural; implementing with fewer params is fine).
+
+Lint cost: ~6 s warm, up to ~60 s cold on this machine (measured) — run it per
+change-set, not per file.

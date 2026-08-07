@@ -1,0 +1,63 @@
+# .claude/ — how this repo works with Claude Code
+
+For two readers: an engineer joining this repo, and a reviewer assessing how it
+was built. Five minutes, then start working.
+
+## What is here and why
+
+| Path | What it is |
+| --- | --- |
+| `skills/` | The project's conventions, codified. Each skill is grounded in this repo's real versions, measured output, and failures that actually happened here — not general advice. |
+| `agents/verifier.md` | A subagent that runs the full green chain and reports honestly. Exists because verification is long, noisy, and benefits from a context with no investment in the change being good. |
+| `hooks/` | Two Node scripts: `guard-env-commit.js` blocks any git command that would stage or commit a `.env` (tested live — it fires); `warn-migration-edit.js` warns when a committed migration file is edited, because executed migrations are immutable. |
+| `settings.json` | Committed, shared: hook wiring, a small allow-list for the routine commands, and a deny on reading `.env`. Nothing machine-specific. |
+| `settings.local.json` | Yours, gitignored. Copy `settings.local.json.example` if you want extra personal permissions. |
+
+## "I am about to X" → read this first
+
+| About to… | Read |
+| --- | --- |
+| Add/change a module, controller, provider, DTO, filter, interceptor, or read config | `skills/nest-conventions` |
+| Touch anything spatial: geometry columns, SRIDs, spatial queries, GIST indexes, geo validation | `skills/postgis-spatial` |
+| Create, edit, run, or revert a migration; change schema | `skills/typeorm-migrations` |
+| Write tests, run suites, or declare a change "green" | `skills/testing-verification` |
+| Commit | Run the green chain (or the `verifier` agent) first. The full chain is defined in `skills/testing-verification`. |
+
+Claude Code loads skill descriptions automatically and should reach for these on
+its own; the table is for humans and for prompting it explicitly when it doesn't.
+
+## Session workflow
+
+- **Start**: nothing to read beyond this file once. Infra up:
+  `docker compose up -d`, wait for `(healthy)`. If `.env` is missing:
+  `cp .env.example .env` (mind the 5432/5433 port note in it).
+- **During**: hooks are passive guardrails; if one blocks or warns, it says
+  exactly why and what to do instead.
+- **End / before commit**: green chain (`build`, `lint`, `test`, `test:e2e`,
+  compose healthy). One commit per coherent change, conventional-commit style —
+  see `git log` for the house style.
+- **Decisions**: anything a future reader would ask "why is it like this?" about
+  goes in `docs/ADR/` (numbered, indexed in `docs/ADR/README.md`). Required when a
+  decision constrains future work or rejects an obvious alternative — the bar set
+  by ADR-0001 (extension-via-migration). Point-in-time audits live in `docs/`
+  (e.g. `POSTGIS_SETUP_REVIEW.md`) and are never rewritten, only annotated.
+
+## Deliberately NOT here
+
+- **No CLAUDE.md.** The skills carry the conventions with better targeting; a
+  CLAUDE.md would either duplicate them or drift from them. If one appears later
+  it should be a pointer to this file, not a second source of truth.
+- **No lint/format hook on file edits.** Measured on this machine: type-checked
+  ESLint takes ~6 s warm and ~60 s cold even for one file. Per-edit that is
+  unusable; lint runs once per change-set instead.
+- **No migration-vs-database hook.** Checking whether an edited migration was
+  *actually executed* requires a live DB query per edit and fails when Docker is
+  down — a hook that blocks unrelated work. The cheap proxy (warn on edits to
+  *committed* migrations) ships instead.
+- **No reviewer agent.** In a repo this size the skills themselves are the review
+  checklist and the main session has more context about the change than a fresh
+  agent would. The `verifier` agent exists because running commands is different:
+  it needs no context, just discipline.
+- **No CI config, no commit-msg enforcement, no coverage gates.** 3-day project;
+  the green chain run by a human (or the verifier) covers it. Raise coverage
+  thresholds when domain code lands.
