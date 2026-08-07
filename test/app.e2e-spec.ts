@@ -33,6 +33,8 @@ describe('Health (e2e)', () => {
     expect(body.status).toBe('ok');
     expect(body.info.database.status).toBe('up');
     expect(body.details.database.status).toBe('up');
+    expect(body.info.redis.status).toBe('up');
+    expect(body.details.redis.status).toBe('up');
     expect(body).not.toHaveProperty('data');
     expect(body).not.toHaveProperty('statusCode');
   });

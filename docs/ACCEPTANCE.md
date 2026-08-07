@@ -79,11 +79,16 @@ observable state throughout; scenario 13 asserts the response body itself.
 
 ## 10. preserves all transition semantics with Redis unavailable
 
-- **Setup**: stop the Redis container (`docker compose stop redis`).
+Phase 3's central scenario (transferred from Phase 2, which had no Redis
+integration to disable): verified by actually stopping the container and
+running the full suite under `PRESENCE_READ_STRATEGY=cache` — not mocked.
+
+- **Setup**: stop the Redis container (`docker compose stop redis`), cache
+  strategy active.
 - **Sequence**: re-run the sequences of scenarios 2, 3, 4, and 8.
 - **Expected**: identical log and presence outcomes; no request fails with a
   5xx. Only latency may differ — decision 6: losing Redis costs latency, never
-  correctness.
+  correctness. `/health` stays 200 with `redis: down` reported.
 
 ## 11. rejects an invalid polygon with 400 and stores nothing
 

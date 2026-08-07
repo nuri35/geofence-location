@@ -61,6 +61,19 @@ A stale or missing cache entry costs one primary-key lookup; it can never
 change what gets logged, because logging is decided by the `RETURNING` clause,
 never by the cache.
 
+**Cache-under-lock (correctness constraint, discovered in Phase 3):** the cache
+read, its population, and the in-flight invalidation all happen INSIDE the
+transaction, under the advisory lock. A cache value read before the lock can
+already have been invalidated by a concurrent same-user request — and on the
+**exit** side there is no `ON CONFLICT` backstop: acting on that stale set
+would silently swallow a genuine re-entry. The lock is per-user, so ordering
+the cache behind it costs nothing across users. Population is also safe
+against rollback by construction: the value written is the *pre-transition*
+database read, which is exactly the state a rollback restores; an invalidation
+followed by rollback merely causes one extra database read. A second
+invalidation runs after commit, failures swallowed — belt-and-braces, since a
+cache left empty is always harmless.
+
 ## Alternatives considered
 
 - **Derive previous state from the logs table** — rejected. The most recent log

@@ -10,6 +10,7 @@ import { EnablePostgisExtension1786038977187 } from '../src/migrations/178603897
 import { CreateAreasTable1786108207631 } from '../src/migrations/1786108207631-CreateAreasTable';
 import { CreateLogsTable1786110074569 } from '../src/migrations/1786110074569-CreateLogsTable';
 import { CreatePresenceTable1786110075607 } from '../src/migrations/1786110075607-CreatePresenceTable';
+import { CreateLockedPresenceReadFunction1786118827443 } from '../src/migrations/1786118827443-CreateLockedPresenceReadFunction';
 import { E2E_DATABASE_NAME } from './e2e-constants';
 
 // Migrations are imported explicitly (no glob: transform contexts resolve globs
@@ -20,6 +21,7 @@ const MIGRATIONS = [
   CreateAreasTable1786108207631,
   CreateLogsTable1786110074569,
   CreatePresenceTable1786110075607,
+  CreateLockedPresenceReadFunction1786118827443,
 ];
 
 const provisionE2eDatabase = async (): Promise<void> => {

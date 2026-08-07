@@ -63,6 +63,7 @@ Numbered, append-only. One or two sentences here; the reasoning lives in the ADR
 12. `GET /logs` uses keyset pagination with a cursor over `(recorded_at, id)` and filters `userId`, `areaId`, `from`, `to`; offset pagination is rejected because it skips and duplicates rows under concurrent inserts on an append-only table. — [ADR 0006](docs/ADR/0006-read-endpoint-pagination.md)
 13. `GET /areas` returns full geometry as GeoJSON with plain `limit`/`offset` — acceptable because the table is small and nearly static; the two read endpoints differ by decision, not accident. — [ADR 0006](docs/ADR/0006-read-endpoint-pagination.md)
 14. `user_id` is `varchar(64)` — free-form, since auth is a non-goal (identity is a claim, not a verified fact), but bounded so the column and the advisory-lock hash have a defined input.
+15. The presence read strategy is under measurement (ADR 0007): three switchable candidates — `two-step` baseline, `folded` (lock+read in one round trip via a plpgsql function), `cache` (Redis read-through) — selected by `PRESENCE_READ_STRATEGY`. Outcome pending; the losing paths and the flag are removed when the measurement closes the decision. — [ADR 0007](docs/ADR/0007-presence-read-strategy.md)
 
 ## Hard constraints
 
@@ -87,7 +88,7 @@ The single source of truth for progress — phase documents carry no status fiel
 | 0 | Architecture decisions, scope, acceptance criteria | Complete |
 | 1 | Areas: table + migration + GIST index, `POST`/`GET /areas`, `ST_IsValid` gating, vertex cap; point-in-polygon query proven in isolation with `EXPLAIN ANALYZE` on the real query shape | Complete |
 | 2 | Core (must not be cut): logs + `user_area_presence` tables, full `POST /locations` transition path — transaction + advisory lock + `ON CONFLICT` + exit-side deletion; every acceptance scenario becomes a test | Complete |
-| 3 | Redis read-through cache in front of presence + Redis health indicator. Explicitly cuttable — the architecture is correct without it | Not started |
+| 3 | Redis read-through cache in front of presence + Redis health indicator. Explicitly cuttable — the architecture is correct without it | Complete — both ADR 0007 candidates built; strategy decision pending measurement |
 | 4 | `GET /logs` keyset pagination + its indexes, pool sizing, `statement_timeout`, load measurement with real numbers | Not started |
 | 5 | README, Swagger, full green chain, manual audit of every acceptance scenario, clean-clone verification | Not started |
 
