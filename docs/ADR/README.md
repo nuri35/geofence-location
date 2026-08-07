@@ -7,3 +7,4 @@
 | [0003](0003-spatial-query-strategy.md) | Spatial query strategy: PostGIS with a GIST index, `ST_Covers` | Accepted | 2026-08-07 |
 | [0004](0004-no-queue.md) | No message queue on the write path | Accepted | 2026-08-07 |
 | [0005](0005-time-and-ordering-policy.md) | Time and ordering policy | Accepted | 2026-08-07 |
+| [0006](0006-read-endpoint-pagination.md) | Read endpoint pagination: keyset for logs, offset for areas | Accepted | 2026-08-07 |

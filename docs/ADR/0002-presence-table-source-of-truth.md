@@ -16,18 +16,27 @@ case — and must never disagree with the log the system emits.
 ## Decision
 
 A mutable table `user_area_presence(user_id, area_id)` with a composite primary
-key holds current membership; PostgreSQL is the source of truth. Per accepted
-location report, in **one transaction**:
+key holds current membership; PostgreSQL is the source of truth. Per location
+report, in **one transaction**:
 
-1. Compute the current area set with the spatial query (ADR 0003).
-2. `INSERT INTO user_area_presence … ON CONFLICT DO NOTHING RETURNING …` for
+1. `SELECT pg_advisory_xact_lock(hashtext(user_id))` — the transaction's first
+   statement. It serializes concurrent requests for the same user, closing the
+   insert-vs-delete interleaving (an enter-sample and an exit-sample processed
+   concurrently), and releases automatically at transaction end. Different
+   users never contend, so at this scale the lock costs nothing.
+2. Compute the current area set with the spatial query (ADR 0003).
+3. `INSERT INTO user_area_presence … ON CONFLICT DO NOTHING RETURNING …` for
    the current set. The rows actually returned are precisely the entries.
-3. Insert one log row per returned row. A log is emitted **only** for a
+4. Insert one log row per returned row. A log is emitted **only** for a
    returned row — of two racing identical requests, exactly one insert returns
    the row, so exactly one log is written, enforced by the database rather than
    by application discipline.
-4. Delete this user's presence rows for areas not in the current set (exit
+5. Delete this user's presence rows for areas not in the current set (exit
    maintenance; exits are not logged — a declared non-goal, see docs/SCOPE.md).
+
+The lock does not replace `ON CONFLICT DO NOTHING` — both stay. The lock orders
+same-user work; the constraint is what makes the log-or-not decision correct,
+and it is the backstop if the lock is ever bypassed.
 
 Commit, or none of it happened. A user entering three overlapping areas in one
 report gets three returned rows and three logs — the transition is a set
@@ -35,11 +44,22 @@ difference, not a single value (decision 5). A first-ever observation inside an
 area produces entries by the same mechanism; this is recorded as an accepted
 assumption, not an observed transition (decision 9).
 
-Redis fronts this table as a **read-through cache only**: lazy loading on miss,
-negative caching for empty membership, updated only after the owning
-transaction commits. A stale or missing cache entry costs one primary-key
-lookup; it can never change what gets logged, because logging is decided by the
-`RETURNING` clause, never by the cache.
+Redis fronts this table as a **read-through cache only**, with two mechanisms
+fixed here:
+
+- **Encoding**: the cached membership is a JSON array stored as a plain string
+  value — not a Redis SET. The empty set is the string `"[]"`, a real value
+  that distinguishes "known to be in no areas" (negative caching) from "not
+  cached" (key absent); a Redis SET cannot represent an empty set, because
+  empty set keys do not exist.
+- **Post-commit behaviour**: the cache is **invalidated** after commit, never
+  updated. Deleting a key is idempotent and safe to lose; writing a computed
+  value after a transaction can race another request's write and persist a
+  stale set.
+
+A stale or missing cache entry costs one primary-key lookup; it can never
+change what gets logged, because logging is decided by the `RETURNING` clause,
+never by the cache.
 
 ## Alternatives considered
 
@@ -82,11 +102,13 @@ Negative / accepted honestly:
   transaction on every write-path request.
 - Presence rows never expire: a user absent for a month is still "inside", and
   their return produces no new entry. If absence-based reset is ever wanted, it
-  must be an explicit rule over `last_seen_at` (ADR 0005) — a product decision
-  — never a cache-TTL side effect.
-- `ON CONFLICT` serializes duplicate *inserts*; it does not serialize an insert
-  racing a *delete* — an enter-sample and an exit-sample from the same user
-  processed concurrently can interleave. ADR 0005's staleness guard narrows
-  that window only when the client supplies `observed_at`. Full per-user
-  serialization (advisory lock) is deliberately not attempted until the
-  interleaving is observed in practice.
+  must be an explicit product rule — and would need a per-user last-report
+  timestamp the schema deliberately does not keep (the presence row's
+  `last_seen_at` records membership changes only, ADR 0005) — never a
+  cache-TTL side effect.
+- Advisory locks are per-database and do not survive connection pooling in
+  transaction mode (e.g. pgbouncer): `pg_advisory_xact_lock` is
+  transaction-scoped so it works under transaction pooling *today*, but any
+  future move to session-scoped advisory locks or a pooler that multiplexes
+  mid-transaction breaks the serialization silently. Noted, not solved;
+  `ON CONFLICT` remains the correctness backstop either way.

@@ -6,10 +6,10 @@ requests, and the expected observable result. "Log row" means a row in the
 entry log with (user, area, `recorded_at`); presence means `user_area_presence`
 (ADR 0002).
 
-Response codes are asserted only where already decided (validation failures are
-400 per CLAUDE.md hard constraints). The success/rejection codes of
-`POST /locations` are fixed in Phase 3 — scenarios here assert state, which is
-what must not change regardless of that choice.
+Response contracts are decided: `POST /locations` returns 201 with
+`{ enteredAreaIds: [...] }` inside the standard response envelope (decision 11),
+and validation failures are 400 (CLAUDE.md hard constraints). Scenarios assert
+observable state throughout; scenario 13 asserts the response body itself.
 
 ## 1. logs nothing for a user outside all areas
 
@@ -66,14 +66,16 @@ what must not change regardless of that choice.
 - **Expected**: both requests complete without error; exactly one log row
   (U, A); exactly one presence row (U, A).
 
-## 9. ignores a request older than last_seen_at
+## 9. persists observed_at without letting it affect the outcome
 
-- **Setup**: U inside A; U's last accepted request carried `observed_at` = T2.
-- **Sequence**: `POST /locations` for U with `observed_at` = T1 < T2, point
-  outside A.
-- **Expected**: no state change — presence still contains (U, A), no new log
-  row, `last_seen_at` still T2. (ADR 0005: the stale sample must not resurrect
-  or destroy state.)
+- **Setup**: area A. U outside A.
+- **Sequence**: `POST /locations` for U inside A carrying an `observed_at` far
+  in the past; later, the same sequence for a second user V without any
+  `observed_at`.
+- **Expected**: identical transition outcomes for U and V — one entry log each,
+  one presence row each (ADR 0005: `observed_at` participates in no logic).
+  U's log row carries the supplied `observed_at` verbatim; V's carries null.
+  Both rows' `recorded_at` are server-assigned.
 
 ## 10. preserves all transition semantics with Redis unavailable
 
@@ -100,3 +102,23 @@ what must not change regardless of that choice.
   longitude 181; `POST /areas` containing a vertex with latitude −91.
 - **Expected**: all rejected with 400 at the DTO layer (lat ∈ [−90, 90],
   lng ∈ [−180, 180]); no state of any kind is touched.
+
+## 13. returns 201 naming exactly the areas entered
+
+- **Setup**: areas A and B overlap. U has no prior state.
+- **Sequence**: `POST /locations` for U with a point covered by both; then an
+  identical second request.
+- **Expected**: first response is 201 with `data.enteredAreaIds` containing
+  exactly A's and B's ids (decision 11; `data` is the response envelope). The
+  second response is 201 with `data.enteredAreaIds` = `[]` — accepted, nothing
+  entered. The body must agree with the database: ids in `enteredAreaIds`
+  correspond one-to-one with the log rows the request created.
+
+## 14. rejects a polygon over the vertex cap
+
+- **Setup**: none.
+- **Sequence**: `POST /areas` with a valid, closed ring of 1001 distinct
+  vertices.
+- **Expected**: 400 at the DTO layer (cap: 1000 vertices, CLAUDE.md hard
+  constraints); no area row stored; a ring of exactly 1000 vertices is
+  accepted.

@@ -70,9 +70,9 @@ Negative / accepted honestly:
 
 - Every location report is a database round trip, even when the point is far
   from every area.
-- The postgis-spatial skill (§6) still names `ST_Contains` as the project
-  convention; it predates this ADR. **This ADR wins on the predicate**; the
-  skill gets updated in Phase 1 when the first real spatial query lands.
+- The postgis-spatial skill (§6) originally named `ST_Contains` as the project
+  convention; it was corrected to `ST_Covers` in Phase 0 when this ADR landed,
+  so skill and constitution agree.
 - `ST_Covers` on shared boundaries means a point on the border between two
   adjacent areas is inside both — consistent with decision 5, but worth knowing
   when reading logs.

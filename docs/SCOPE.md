@@ -41,12 +41,27 @@ invented value would be scope theater.
 
 Mobile delivery is at-least-once; retries replay samples. The transition model
 absorbs most of it — a repeated inside-sample causes no transition, and
-identical concurrent requests are collapsed by `ON CONFLICT` (ADR 0002). The
-residual gap: a stale retry delivered *after* the user exited re-enters them
-falsely, and ADR 0005's guard blocks that only when the client supplies
-`observed_at`. The full fix is a client-generated idempotency key with a
-short-TTL server-side dedup store. Deferred: the residue is small and the fix
-requires a client contract this case doesn't have.
+identical concurrent requests are serialized by the advisory lock and collapsed
+by `ON CONFLICT` (ADR 0002). The residual gap: a stale retry delivered *after*
+the user exited re-enters them falsely, and nothing blocks that (see
+"Out-of-order sample protection" below — same root cause, same fix). The full
+fix is a client-generated idempotency key with a short-TTL server-side dedup
+store. Deferred: the residue is small and the fix requires a client contract
+this case doesn't have.
+
+## Out-of-order sample protection
+
+Processing order is server arrival order (ADR 0005), and `observed_at`
+participates in no logic — so a location sample delayed in transit is processed
+as if it were current. The cost: a stale sample can produce a wrong transition.
+Concretely, a user exits area A, and an old inside-A sample arriving late
+re-inserts their presence and logs a phantom entry; the next genuine report
+corrects the state but the false log row remains. The real fix is client
+sequence numbers — per-device monotonic counters that need no trusted clock —
+rejected here because they change the client contract and a technical case has
+no real client to hold to it. A client-clock staleness guard was considered and
+dropped (ADR 0005, alternatives): it defended against this case badly, at the
+price of per-user state and cross-clock comparisons.
 
 ## Log retention and partitioning
 

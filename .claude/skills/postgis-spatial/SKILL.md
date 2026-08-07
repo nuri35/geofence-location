@@ -221,8 +221,11 @@ Prove it every time a spatial query lands: `EXPLAIN ANALYZE <query>` and look fo
 
 For "is this point inside this geofence area":
 
-- **Use `ST_Contains(area, point)`** — true when the point is in the interior.
-  This is the project convention.
+- **Use `ST_Covers(area, point)`** — true when the point is in the interior
+  *or exactly on the boundary*. This is the project convention (CLAUDE.md
+  decision 2, ADR 0003): the fence line counts as inside, so a user standing
+  on it does not owe their entry to GPS noise. `ST_Contains(area, point)` is
+  the interior-only variant — do not use it here; it excludes the boundary.
 - `ST_Within(point, area)` is the *same test with arguments reversed*
   (`ST_Within(A, B) ≡ ST_Contains(B, A)`). Not wrong — but pick one convention and
   stick to it, because for non-point geometries swapping arguments silently inverts
@@ -231,9 +234,8 @@ For "is this point inside this geofence area":
   the boundary** (Intersects = true there, Contains = false). Performance is the same
   (both are index-rewritten, verified plan above). It becomes semantically wrong the
   day the tracked object is a shape instead of a point: Intersects answers "touches
-  at all", not "is inside". If the product decision is "on the fence line counts as
-  inside", switch to `ST_Covers(area, point)` deliberately — do not reach for
-  Intersects to get boundary inclusion.
+  at all", not "is inside". Boundary inclusion is already provided here by the
+  `ST_Covers` convention above — never reach for Intersects to get it.
 
 For radius queries use `ST_DWithin(geom::geography, $point::geography, meters)`,
 never `ST_Distance(...) < meters` (§5).

@@ -6,48 +6,50 @@
 ## Context
 
 Mobile clients deliver location samples late, twice, and out of order, with
-clocks skewed by minutes. A sample applied out of order corrupts presence state
-twice over: it can log a phantom entry for an area the user already left, and
-the now-wrong state swallows the next genuine entry. Separately, the log's
-timestamp has to come from a clock the system actually controls.
+clocks skewed by minutes. The log's timestamp must come from a clock the system
+controls, and the question is whether client-reported time should participate
+in ordering or state decisions at all.
 
 ## Decision
 
 - **`recorded_at`** — assigned server-side at receipt — is authoritative for
-  log rows and for all ordering. All timestamps are `timestamptz`.
-- **`observed_at`** — client-reported, nullable — is stored as informational
-  context only. It has exactly one power: a request whose `observed_at` proves
-  it older than the user's `last_seen_at` is rejected without touching state.
-  It never mutates state on its own and never overrides server ordering.
-- Processing order is server arrival order. `last_seen_at` is the greatest
-  accepted `observed_at` per user — client clock compared only against itself,
-  never across clock domains — updated on every accepted request that carries
-  an `observed_at`. Where it lives (a user-level row alongside presence) is
-  fixed by the Phase 1 schema.
+  **both ordering and the logged time**. Processing order is server arrival
+  order. All timestamps are `timestamptz`.
+- **`observed_at`** — client-reported, nullable — is stored for informational
+  purposes only and **participates in no logic**: no rejection, no comparison,
+  no state. It is context for a human reading the data, nothing more.
+- **`last_seen_at`** lives on the presence row and means only "when this
+  membership last changed". It is written when the row is written, never on a
+  read-only request, and it is not a decision input.
 
 ## Alternatives considered
 
 - **Client timestamps authoritative** — rejected: minutes of skew are normal,
   cross-user ordering becomes fiction, and the value is client-controlled.
-- **Client sequence numbers** — rejected for this case: a genuinely stronger
-  ordering guarantee than a stale-drop guard, but it changes the client
-  contract, and in a technical case there is no real client to hold to it.
+- **A staleness guard comparing `observed_at` against the last accepted
+  `observed_at`** — the first draft of this ADR — rejected on review: server
+  arrival time already defines processing order, so the guard defended against
+  a case the server clock already handles, at the price of a per-user state row
+  written on every request and a clock-domain comparison. It also let a client
+  with a skewed-fast clock suppress its own subsequent updates.
+- **Client sequence numbers** — the real fix for in-transit reordering, and the
+  only one that works without trusting client clocks. Rejected for this case:
+  it changes the client contract, and a technical case has no real client to
+  hold to it. The cost of living without it is recorded in docs/SCOPE.md.
 
 ## Consequences
 
 Positive:
 
-- Log timestamps are consistent and assigned by one clock.
-- The worst out-of-order corruption — a stale sample resurrecting an area the
-  user already exited — is blocked whenever the client supplies `observed_at`.
+- One clock, one ordering rule, no per-user hot row on the read-mostly path,
+  no clock-domain arithmetic anywhere in the system.
+- The write path stays exactly ADR 0002's transaction — nothing precedes it but
+  the advisory lock.
 
-Negative / accepted honestly — **this is a guard, not an ordering protocol**:
+Negative / accepted honestly:
 
-- A request without `observed_at` gets no staleness protection at all.
-- A client with a skewed-fast clock can suppress its own updates: one sample
-  with a far-future `observed_at` raises `last_seen_at` past every genuine
-  sample that follows, until the real clock catches up. The damage is scoped to
-  that one user and self-inflicted; a plausibility window on `observed_at` is a
-  known mitigation, deferred until the behaviour is observed.
-- Two requests arriving in the same instant are not ordered by this policy;
-  their interleaving is bounded only by ADR 0002's `ON CONFLICT` guarantee.
+- A location sample delayed in transit is processed as if it were current: a
+  stale sample can produce a wrong transition (expanded in docs/SCOPE.md,
+  "Out-of-order sample protection"). This is the deliberate price of dropping
+  the guard; the remedy, if ever needed, is client sequence numbers — not a
+  return to client-clock comparisons.
