@@ -5,7 +5,7 @@ import { ConfigNamespace, EnvKey, NodeEnvironment, PresenceReadStrategy } from '
 export interface AppConfig {
   environment: NodeEnvironment;
   port: number;
-  /** Measurement scaffolding (ADR 0007) — removed once the strategy decision is closed. */
+  /** ADR 0007, decided by measurement: folded default; alternates kept for reversibility. */
   presenceReadStrategy: PresenceReadStrategy;
 }
 
@@ -14,5 +14,5 @@ export const appConfig = registerAs(ConfigNamespace.App, (): AppConfig => ({
   port: parseInt(process.env[EnvKey.Port] ?? '3000', 10),
   presenceReadStrategy:
     (process.env[EnvKey.PresenceReadStrategy] as PresenceReadStrategy) ??
-    PresenceReadStrategy.TwoStep,
+    PresenceReadStrategy.Folded,
 }));

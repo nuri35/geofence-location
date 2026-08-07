@@ -1,6 +1,6 @@
-# ADR 0007 — Presence read strategy (decision pending measurement)
+# ADR 0007 — Presence read strategy: folded lock+read wins
 
-- **Status**: Proposed — to be closed by the Phase 4 measurement task
+- **Status**: Accepted — closed by measurement (docs/PRESENCE_READ_MEASUREMENT.md)
 - **Date**: 2026-08-07
 
 ## Context
@@ -43,13 +43,43 @@ Postgres round-trip/pool contention at load, not on raw read cost.
 
 ## Decision
 
-Open. The measurement task closes it; the losing paths and the
-`PRESENCE_READ_STRATEGY` flag are then removed — the switch is scaffolding for
-this decision, not a feature.
+**`folded` is the default.** Measured under closed-loop load (10/50/200/500
+in-flight, 10,000 users, both workload shapes — full method, curves and caveats
+in docs/PRESENCE_READ_MEASUREMENT.md):
 
-## Consequences (of the measurement scaffolding itself)
+- `folded` beat `two-step` by **+15–20% throughput with lower p50/p95/p99 at
+  every concurrency level in both workloads** (e.g. static c=500: 1,605 vs
+  1,393 req/s; transition c=500: 1,394 vs 1,230 req/s) — almost exactly the one
+  removed round trip out of ~5.
+- `cache` was **measured and not adopted**: +7% over baseline in the static
+  workload at a 99.7% hit rate, but **−13 to −18% below baseline in the
+  transition-heavy workload** (hit rate 0.50–0.78, DEL+SET churn, and the Redis
+  hop sitting inside the locked transaction). The cache-under-lock correctness
+  requirement (ADR 0002) removes the "release the connection sooner" benefit a
+  cache would normally buy; Redis server-side latency (2–3 µs/command) was
+  never the problem — the hops were.
+- The pool never became the constraint (10 connections, mostly idle-in-
+  transaction; zero errors at every level); the app tier saturates first at
+  ~1.3–1.6 k req/s on this box.
 
-- Three code paths temporarily coexist in `LocationsService.lockAndReadPrevious`;
-  the full e2e suite runs under any strategy via the env var.
-- The plpgsql function ships as a migration and stays regardless of outcome
-  (dropping it is a one-line migration if `folded` loses).
+The `cache` and `two-step` paths and the `PRESENCE_READ_STRATEGY` flag are
+**kept, not deleted**: the decision is recorded with evidence and stays
+reversible — a deployment where Redis is co-located with the app while Postgres
+is remote inverts the round-trip arithmetic, and re-measuring there is a flag
+flip, not a rebuild.
+
+Conditions and limits: single box (Windows/WSL2 Docker), localhost networking,
+synthetic uniform load, default pool of 10, 12 s windows. The ranking argument
+is architectural and should transfer; the absolute numbers should not.
+
+## Consequences
+
+- Default `PRESENCE_READ_STRATEGY=folded` (Joi default, `.env.example`, README).
+- Three code paths remain in `LocationsService.lockAndReadPrevious` behind the
+  flag; the full e2e suite runs under any of them via the env var.
+- The plpgsql function `lock_user_and_read_presence` is now on the hot path;
+  its lock-before-read ordering is documented plpgsql semantics, verified by
+  the blocking experiment recorded in this ADR's Candidates section.
+- Revisit trigger: any topology change that adds real network distance between
+  the app and Postgres, or a measured pool-contention regime — re-run
+  `scripts/measure-presence.mjs` and re-decide.

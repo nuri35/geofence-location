@@ -86,7 +86,7 @@ Required variables have no fallback — the app refuses to start if one is missi
 | ------------------- | -------- | ------------- | -------------------------------------------- |
 | `NODE_ENV`          | no       | `development` | `development` \| `test` \| `production`      |
 | `PORT`              | no       | `3000`        | HTTP port                                    |
-| `PRESENCE_READ_STRATEGY` | no  | `two-step`    | ADR 0007 measurement: `two-step` \| `folded` \| `cache` |
+| `PRESENCE_READ_STRATEGY` | no  | `folded`      | ADR 0007 (measured): `folded` \| `two-step` \| `cache` |
 | `POSTGRES_HOST`     | yes      | —             | Postgres host                                |
 | `POSTGRES_PORT`     | yes      | —             | Postgres port (also used by compose mapping) |
 | `POSTGRES_USER`     | yes      | —             | Postgres user                                |

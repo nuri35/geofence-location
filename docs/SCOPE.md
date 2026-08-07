@@ -89,10 +89,13 @@ made with a product owner. Frozen rather than half-decided.
 
 Nothing stops one client from reporting at 100 req/s instead of 0.1. The cost
 is multiplied load share, pool pressure, and an open abuse surface — though not
-log corruption, since extra inside-samples cause no transitions. The fix is a
-per-user token bucket (`@nestjs/throttler` backed by the Redis already in the
-stack, or at the gateway). Deferred with the rest of the abuse surface, behind
-the missing authentication.
+log corruption, since extra inside-samples cause no transitions. Load
+measurement added a data point: `/health` costs a real DB ping + Redis ping per
+call and plateaus at ~1k req/s on the reference box — an unauthenticated
+amplification target that a token bucket should also cover. The fix is a
+per-user bucket (`@nestjs/throttler` backed by the Redis already in the stack,
+or at the gateway). Deferred with the rest of the abuse surface, behind the
+missing authentication.
 
 ## Antimeridian and pole-crossing polygons
 

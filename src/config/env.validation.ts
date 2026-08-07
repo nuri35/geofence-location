@@ -9,7 +9,7 @@ export const envValidationSchema = Joi.object({
   [EnvKey.Port]: Joi.number().port().default(3000),
   [EnvKey.PresenceReadStrategy]: Joi.string()
     .valid(...Object.values(PresenceReadStrategy))
-    .default(PresenceReadStrategy.TwoStep),
+    .default(PresenceReadStrategy.Folded),
   [EnvKey.PostgresHost]: Joi.string().required(),
   [EnvKey.PostgresPort]: Joi.number().port().required(),
   [EnvKey.PostgresUser]: Joi.string().required(),
