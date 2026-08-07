@@ -11,6 +11,7 @@ import { CreateAreasTable1786108207631 } from '../src/migrations/1786108207631-C
 import { CreateLogsTable1786110074569 } from '../src/migrations/1786110074569-CreateLogsTable';
 import { CreatePresenceTable1786110075607 } from '../src/migrations/1786110075607-CreatePresenceTable';
 import { CreateLockedPresenceReadFunction1786118827443 } from '../src/migrations/1786118827443-CreateLockedPresenceReadFunction';
+import { CreateLogsRecordedIdIndex1786128051611 } from '../src/migrations/1786128051611-CreateLogsRecordedIdIndex';
 import { E2E_DATABASE_NAME } from './e2e-constants';
 
 // Migrations are imported explicitly (no glob: transform contexts resolve globs
@@ -22,6 +23,7 @@ const MIGRATIONS = [
   CreateLogsTable1786110074569,
   CreatePresenceTable1786110075607,
   CreateLockedPresenceReadFunction1786118827443,
+  CreateLogsRecordedIdIndex1786128051611,
 ];
 
 const provisionE2eDatabase = async (): Promise<void> => {

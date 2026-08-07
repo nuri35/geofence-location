@@ -90,7 +90,7 @@ The single source of truth for progress — phase documents carry no status fiel
 | 1 | Areas: table + migration + GIST index, `POST`/`GET /areas`, `ST_IsValid` gating, vertex cap; point-in-polygon query proven in isolation with `EXPLAIN ANALYZE` on the real query shape | Complete |
 | 2 | Core (must not be cut): logs + `user_area_presence` tables, full `POST /locations` transition path — transaction + advisory lock + `ON CONFLICT` + exit-side deletion; every acceptance scenario becomes a test | Complete |
 | 3 | Redis read-through cache in front of presence + Redis health indicator. Explicitly cuttable — the architecture is correct without it | Complete, then reversed on evidence: cache built and measured (ADR 0007), rejected, and removed along with the Redis infrastructure |
-| 4 | `GET /logs` keyset pagination + its indexes, pool sizing, `statement_timeout`, load measurement with real numbers | In progress — strategy measurement done (docs/PRESENCE_READ_MEASUREMENT.md); GET /logs, pool sizing, statement_timeout pending |
+| 4 | `GET /logs` keyset pagination + its indexes, pool sizing, `statement_timeout`, load measurement with real numbers | In progress — 4A done: strategy measurement (docs/PRESENCE_READ_MEASUREMENT.md) + `GET /logs` with `idx_logs_recorded_id`; 4B pending: pool sizing, `statement_timeout`, backpressure |
 | 5 | README, Swagger, full green chain, manual audit of every acceptance scenario, clean-clone verification | Not started |
 
 ## Session protocol

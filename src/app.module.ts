@@ -8,6 +8,7 @@ import { HttpExceptionFilter } from '@app/common/filters';
 import { ResponseTransformInterceptor } from '@app/common/interceptors';
 import { HealthModule } from '@app/health/health.module';
 import { LocationsModule } from '@app/locations/locations.module';
+import { LogsModule } from '@app/logs/logs.module';
 import { appConfig } from '@config/app.config';
 import { databaseConfig } from '@config/database.config';
 import { envValidationSchema } from '@config/env.validation';
@@ -29,6 +30,7 @@ import { typeOrmModuleFactory } from '@config/typeorm.config';
     }),
     AreasModule,
     LocationsModule,
+    LogsModule,
     HealthModule,
   ],
   providers: [

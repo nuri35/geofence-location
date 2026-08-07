@@ -118,7 +118,7 @@ The API listens on `http://localhost:3000`. Health: `GET /health`. Swagger UI: `
 | `POST /locations` | Report a position; returns 201 `{ enteredAreaIds: [...] }` — the entries this request produced, `[]` when nothing changed |
 | `POST /areas` | Create an area from a GeoJSON Polygon (`[lng, lat]` order; ≤1000 vertices; `ST_IsValid`-gated with the reason in the 400) |
 | `GET /areas` | List areas with full GeoJSON geometry, `limit`/`offset` |
-| `GET /logs` | Planned (Phase 4): keyset pagination over `(recorded_at, id)` |
+| `GET /logs` | Entry log, newest first, keyset-paginated over `(recorded_at, id)` via an opaque cursor (`nextCursor`, null at the end); optional combinable filters `userId`, `areaId`, `from`/`to` on `recorded_at`; page size 50, max 500 |
 
 ## Scripts
 
@@ -146,7 +146,7 @@ src/
 ├── common/                  # global filter, response envelope interceptor, decorators
 ├── areas/                   # POST/GET /areas, GeoJSON validation, ST_Covers containment query
 ├── locations/               # POST /locations — the transition path (ADR 0002)
-├── logs/                    # LogEntity (entry events; GET /logs lands in Phase 4)
+├── logs/                    # entry events: LogEntity + GET /logs (keyset pagination, ADR 0006)
 ├── presence/                # PresenceEntity — the source-of-truth membership table
 ├── health/                  # GET /health (Terminus, db ping)
 └── migrations/              # extension → areas → logs → presence → lock/read function
