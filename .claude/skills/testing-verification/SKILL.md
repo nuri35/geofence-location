@@ -37,12 +37,10 @@ Jest 29 + ts-jest, Supertest 7. Two suites with different trust models.
   test/setup-env.ts points the app's config at it. The dev database is never
   touched by tests. New migrations must be added to the explicit MIGRATIONS list
   in global-setup.ts — a missing table in e2e is the reminder.
-- The full suite runs under any presence-read strategy via
-  `PRESENCE_READ_STRATEGY` (default: folded, ADR 0007). The Redis-down
-  verification is `docker compose stop redis` + the locations/areas suites under
-  the cache strategy — real container stop, not mocks. Known nuisance: with Redis
-  down, Jest may warn "worker failed to exit gracefully" (ioredis reconnect-timer
-  race at teardown); flaky, cosmetic, does not affect results.
+- The presence read has exactly one implementation (folded, ADR 0007) — the
+  strategy flag, the Redis cache, and the Redis container are gone, so there is
+  no Redis-down verification any more and the old "worker failed to exit"
+  ioredis teardown nuisance went with them.
 
 ## The full green chain
 
@@ -53,7 +51,7 @@ npm run build        # nest build + tsc-alias (prod path-alias rewrite)
 npm run lint         # type-checked ESLint; ~6 s warm, ~13 s cold (re-measured after the repo left OneDrive; was ~60 s there)
 npm test
 npm run test:e2e     # needs compose up + healthy
-docker compose ps    # both containers "(healthy)"
+docker compose ps    # the postgres container "(healthy)"
 ```
 
 For config/bootstrap changes, additionally boot the real artifact:

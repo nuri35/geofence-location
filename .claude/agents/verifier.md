@@ -10,7 +10,7 @@ first — it defines the chain and the known traps.
 
 Run, in order, from the repo root:
 
-1. `docker compose ps` — both containers must show `(healthy)`. If not healthy,
+1. `docker compose ps` — the postgres container must show `(healthy)`. If not healthy,
    report that and stop; nothing downstream is meaningful.
 2. `npm run build`
 3. `npm run lint`

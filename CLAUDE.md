@@ -54,7 +54,7 @@ Numbered, append-only. One or two sentences here; the reasoning lives in the ADR
 3. `user_area_presence(user_id, area_id)` in PostgreSQL, composite primary key, is the source of truth for current membership. — [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md)
 4. Presence rows and log rows are written in one transaction; a log is emitted only when `INSERT … ON CONFLICT DO NOTHING … RETURNING` actually returns a row. Departures are the other half: the presence row is deleted and nothing is logged — without the delete, exit-and-re-enter cannot work at all. — [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md)
 5. A user may be inside multiple overlapping areas simultaneously; a transition is a set difference, not a single value. — [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md)
-6. Redis is a read-through cache in front of presence — lazy loading, negative caching as a JSON string value (`"[]"` = known-empty, key absent = not cached), invalidated after commit rather than updated. Losing Redis costs latency, never correctness. — [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md)
+6. *(Replaced 2026-08-07 — the original claim "losing Redis costs latency, never correctness" was falsified in review for the cache path.)* Redis is not part of this system. A read-through presence cache was built, measured, and rejected on evidence — the numbers and a correctness hole are recorded in [ADR 0007](docs/ADR/0007-presence-read-strategy.md); the infrastructure was removed with it. If a cache is ever built, the first candidate is an in-process polygon cache ([ADR 0003](docs/ADR/0003-spatial-query-strategy.md), addendum).
 7. No queue: persistent log inserts are rare (~8/s average, ~170/s worst peak) and connection pool sizing covers spikes. — [ADR 0004](docs/ADR/0004-no-queue.md)
 8. `recorded_at` (server receive time) is authoritative for both ordering and the logged time. `observed_at` (client-reported, nullable) is stored on log rows only, for informational purposes, and participates in no logic — no rejection, no comparison, no state; there is no samples table, and a request that produces no entry stores nothing. — [ADR 0005](docs/ADR/0005-time-and-ordering-policy.md)
 9. First observation of a user already inside an area is recorded as an entry — an accepted assumption, not an observed transition. — [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md)
@@ -63,7 +63,7 @@ Numbered, append-only. One or two sentences here; the reasoning lives in the ADR
 12. `GET /logs` uses keyset pagination with a cursor over `(recorded_at, id)` and filters `userId`, `areaId`, `from`, `to`; offset pagination is rejected because it skips and duplicates rows under concurrent inserts on an append-only table. — [ADR 0006](docs/ADR/0006-read-endpoint-pagination.md)
 13. `GET /areas` returns full geometry as GeoJSON with plain `limit`/`offset` — acceptable because the table is small and nearly static; the two read endpoints differ by decision, not accident. — [ADR 0006](docs/ADR/0006-read-endpoint-pagination.md)
 14. `user_id` is `varchar(64)` — free-form, since auth is a non-goal (identity is a claim, not a verified fact), but bounded so the column and the advisory-lock hash have a defined input.
-15. The presence read strategy is `folded` — lock+read in one round trip via the `lock_user_and_read_presence` plpgsql function — decided by measurement: +15–20% over the two-step baseline in both workloads at every concurrency level, while the Redis cache lost to baseline under transitions. The cache and two-step paths stay behind `PRESENCE_READ_STRATEGY` so the decision remains reversible with evidence attached. — [ADR 0007](docs/ADR/0007-presence-read-strategy.md)
+15. The presence read is `folded` — lock+read in one round trip via the `lock_user_and_read_presence` plpgsql function, the only implementation. Decided by measurement (+15–20% over a two-step baseline in both workloads at every concurrency level, while a Redis cache lost to baseline under transitions); the losing paths and their strategy flag were then removed — the decision stays reversible through the ADR, the measurement doc, and git history, not through dormant code. — [ADR 0007](docs/ADR/0007-presence-read-strategy.md)
 
 ## Hard constraints
 
@@ -77,8 +77,7 @@ Prohibitions. Breaking one is a bug even if everything is green.
 - No polygon with more than 1000 vertices is accepted — enforced at the DTO layer with a clear 400.
 - Presence and log writes never happen outside a single transaction. (Decision 4)
 - The presence write path never uses `repository.save()` — its upsert-by-PK semantics would silently UPDATE an existing membership and defeat the `ON CONFLICT` arbiter. Raw SQL through the transaction's manager only. (ADR 0002)
-- The presence cache, when active, is consulted, populated, and invalidated only under the advisory lock, inside the transaction; only a clean miss may write back. (ADR 0002, cache-under-lock)
-- Redis is never consulted to decide what gets logged, and never written before the owning transaction commits. (Decision 6)
+- No store other than PostgreSQL is ever consulted to decide what gets logged. Any future presence cache must satisfy the cache-under-lock constraint recorded in ADR 0002 — and answer the stale-hit hole recorded in ADR 0007. (Decisions 6, 15)
 - No localhost HTTP verification is trusted without first checking which process owns the port. (`testing-verification`)
 
 ## Phase status
@@ -90,7 +89,7 @@ The single source of truth for progress — phase documents carry no status fiel
 | 0 | Architecture decisions, scope, acceptance criteria | Complete |
 | 1 | Areas: table + migration + GIST index, `POST`/`GET /areas`, `ST_IsValid` gating, vertex cap; point-in-polygon query proven in isolation with `EXPLAIN ANALYZE` on the real query shape | Complete |
 | 2 | Core (must not be cut): logs + `user_area_presence` tables, full `POST /locations` transition path — transaction + advisory lock + `ON CONFLICT` + exit-side deletion; every acceptance scenario becomes a test | Complete |
-| 3 | Redis read-through cache in front of presence + Redis health indicator. Explicitly cuttable — the architecture is correct without it | Complete — both ADR 0007 candidates built; strategy decision pending measurement |
+| 3 | Redis read-through cache in front of presence + Redis health indicator. Explicitly cuttable — the architecture is correct without it | Complete, then reversed on evidence: cache built and measured (ADR 0007), rejected, and removed along with the Redis infrastructure |
 | 4 | `GET /logs` keyset pagination + its indexes, pool sizing, `statement_timeout`, load measurement with real numbers | In progress — strategy measurement done (docs/PRESENCE_READ_MEASUREMENT.md); GET /logs, pool sizing, statement_timeout pending |
 | 5 | README, Swagger, full green chain, manual audit of every acceptance scenario, clean-clone verification | Not started |
 

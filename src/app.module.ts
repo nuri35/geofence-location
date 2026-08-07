@@ -8,18 +8,16 @@ import { HttpExceptionFilter } from '@app/common/filters';
 import { ResponseTransformInterceptor } from '@app/common/interceptors';
 import { HealthModule } from '@app/health/health.module';
 import { LocationsModule } from '@app/locations/locations.module';
-import { RedisModule } from '@app/redis/redis.module';
 import { appConfig } from '@config/app.config';
 import { databaseConfig } from '@config/database.config';
 import { envValidationSchema } from '@config/env.validation';
-import { redisConfig } from '@config/redis.config';
 import { typeOrmModuleFactory } from '@config/typeorm.config';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, redisConfig],
+      load: [appConfig, databaseConfig],
       validationSchema: envValidationSchema,
       validationOptions: {
         abortEarly: true,
@@ -31,7 +29,6 @@ import { typeOrmModuleFactory } from '@config/typeorm.config';
     }),
     AreasModule,
     LocationsModule,
-    RedisModule,
     HealthModule,
   ],
   providers: [

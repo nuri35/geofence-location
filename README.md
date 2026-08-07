@@ -41,27 +41,29 @@ counts as inside, [ADR 0003](docs/ADR/0003-spatial-query-strategy.md)); polygons
 validated structurally at the DTO layer and geometrically with `ST_IsValid` before
 any row is stored, plus a database `CHECK` constraint as backstop.
 
-**The presence read strategy was decided by measurement, not taste**
+**The presence read was decided by measurement, not taste**
 ([ADR 0007](docs/ADR/0007-presence-read-strategy.md), full method and curves in
 [docs/PRESENCE_READ_MEASUREMENT.md](docs/PRESENCE_READ_MEASUREMENT.md)). Three
-switchable implementations exist behind `PRESENCE_READ_STRATEGY`: a two-step
-baseline, a **folded** path (lock + presence read in one round trip via a plpgsql
-function), and a Redis read-through **cache**. Under closed-loop load (10–500
-in-flight, 10,000 users): `folded` won everywhere — +15–20% throughput over baseline
-in both workload shapes (e.g. 1,605 vs 1,393 req/s static, 1,394 vs 1,230 req/s
-transition-heavy at 500 in-flight). Redis was implemented and measured, and **not
-adopted as default**: it helps a static workload (+7% at a 99.7% hit rate) but hurts
-under transitions (−13 to −18% below baseline — invalidation churn, and the Redis hop
-sits inside the locked transaction by correctness requirement). The bottleneck at
-saturation was the Node app tier, not database access: the 10-connection pool sat
-mostly idle-in-transaction with zero errors at every level. **Topology caveat**: these
-numbers were taken with generator, app, Postgres and Redis on one box — same-host
-database, warm connection pool. A remote database changes one comparison only: the
-cache would beat `two-step` (whose presence read is its own round trip) as latency
-rises — but not `folded`, because the cache read sits under the advisory lock, which
-is itself a Postgres round trip; the cache adds a Redis hop on top of that trip
-rather than replacing it. Re-measure with `scripts/measure-presence.mjs` if the lock
-design ever changes.
+implementations were built and compared under closed-loop load (10–500 in-flight,
+10,000 users): a two-step baseline, a **folded** path (lock + presence read in one
+round trip via a plpgsql function), and a Redis read-through **cache**. `folded` won
+everywhere — +15–20% throughput over baseline in both workload shapes (e.g. 1,605 vs
+1,393 req/s static, 1,394 vs 1,230 req/s transition-heavy at 500 in-flight). The
+Redis cache was **built, measured, and removed**: it helps a static workload (+7% at
+a 99.7% hit rate) but hurts under transitions (−13 to −18% below baseline —
+invalidation churn, and the Redis hop sits inside the locked transaction by
+correctness requirement), and review then found a correctness hole in the cache path
+(a Redis outage spanning a transition leaves a stale key that can suppress a genuine
+re-entry log — ADR 0007). The losing paths and the Redis infrastructure were removed;
+`folded` is the only implementation, and the decision stays reversible through the
+documents and git history. The bottleneck at saturation was the Node app tier, not
+database access: the 10-connection pool sat mostly idle-in-transaction with zero
+errors at every level. **Topology caveat**: these numbers were taken with generator,
+app, Postgres and Redis on one box — same-host database, warm connection pool. A
+remote database changes one comparison only: a cache would beat *two-step* (whose
+presence read is its own round trip) as latency rises — but not `folded`, because
+any presence cache must be read under the advisory lock, which is itself a Postgres
+round trip; the cache adds a hop on top of that trip rather than replacing it.
 
 **The measurement also showed presence was the wrong thing to cache.** Presence
 changes on every transition, is per-user, and must be read under a lock —
@@ -87,7 +89,7 @@ The standing revisit condition lives in [ADR 0003](docs/ADR/0003-spatial-query-s
 | Language   | TypeScript 5 (strict)                           |
 | Database   | PostgreSQL 16 + PostGIS 3.4 (`postgis/postgis`) |
 | ORM        | TypeORM 0.3 (DataSource + migrations, no sync)  |
-| Cache      | Redis 7 via ioredis (optional presence cache — measured, non-default) |
+| Cache      | None — a Redis presence cache was evaluated by measurement and removed (ADR 0007) |
 | Validation | class-validator / class-transformer, Joi (env)  |
 | Testing    | Jest 29, Supertest (e2e, dedicated test DB)     |
 | Local infra| Docker Compose                                  |
@@ -101,14 +103,13 @@ The standing revisit condition lives in [ADR 0003](docs/ADR/0003-spatial-query-s
 
 ```bash
 cp .env.example .env        # defaults work with the compose services as-is
-docker compose up -d        # PostGIS + Redis with healthchecks
+docker compose up -d        # PostGIS with healthcheck
 npm install
 npm run migration:run       # PostGIS extension → areas → logs → presence → lock function
 npm run start:dev
 ```
 
-The API listens on `http://localhost:3000`. Health: `GET /health` (database is
-critical; Redis is reported but never fails the endpoint). Swagger UI: `/docs`.
+The API listens on `http://localhost:3000`. Health: `GET /health`. Swagger UI: `/docs`.
 
 ## Endpoints
 
@@ -146,9 +147,8 @@ src/
 ├── areas/                   # POST/GET /areas, GeoJSON validation, ST_Covers containment query
 ├── locations/               # POST /locations — the transition path (ADR 0002)
 ├── logs/                    # LogEntity (entry events; GET /logs lands in Phase 4)
-├── presence/                # PresenceEntity (source of truth) + optional Redis read-through cache
-├── health/                  # GET /health (Terminus: db critical, redis informational)
-├── redis/                   # global ioredis provider, fail-fast tuned (REDIS_CLIENT token)
+├── presence/                # PresenceEntity — the source-of-truth membership table
+├── health/                  # GET /health (Terminus, db ping)
 └── migrations/              # extension → areas → logs → presence → lock/read function
 test/                        # e2e specs + per-run provisioning of the geofence_test database
 scripts/                     # measurement harness (measure-presence.mjs)
@@ -164,12 +164,8 @@ Required variables have no fallback — the app refuses to start if one is missi
 | ------------------- | -------- | ------------- | -------------------------------------------- |
 | `NODE_ENV`          | no       | `development` | `development` \| `test` \| `production`      |
 | `PORT`              | no       | `3000`        | HTTP port                                    |
-| `PRESENCE_READ_STRATEGY` | no  | `folded`      | ADR 0007 (measured): `folded` \| `two-step` \| `cache` |
 | `POSTGRES_HOST`     | yes      | —             | Postgres host                                |
 | `POSTGRES_PORT`     | yes      | —             | Postgres port (also used by compose mapping) |
 | `POSTGRES_USER`     | yes      | —             | Postgres user                                |
 | `POSTGRES_PASSWORD` | yes      | —             | Postgres password                            |
 | `POSTGRES_DB`       | yes      | —             | Database name                                |
-| `REDIS_HOST`        | yes      | —             | Redis host                                   |
-| `REDIS_PORT`        | yes      | —             | Redis port (also used by compose mapping)    |
-| `REDIS_PASSWORD`    | no       | *(empty)*     | Redis password; empty disables auth          |

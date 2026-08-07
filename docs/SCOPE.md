@@ -90,12 +90,13 @@ made with a product owner. Frozen rather than half-decided.
 Nothing stops one client from reporting at 100 req/s instead of 0.1. The cost
 is multiplied load share, pool pressure, and an open abuse surface — though not
 log corruption, since extra inside-samples cause no transitions. Load
-measurement added a data point: `/health` costs a real DB ping + Redis ping per
-call and plateaus at ~1k req/s on the reference box — an unauthenticated
-amplification target that a token bucket should also cover. The fix is a
-per-user bucket (`@nestjs/throttler` backed by the Redis already in the stack,
-or at the gateway). Deferred with the rest of the abuse surface, behind the
-missing authentication.
+measurement added a data point: `/health` costs a real DB ping per call and
+plateaus at ~1k req/s on the reference box — an unauthenticated amplification
+target that a token bucket should also cover. The fix is a per-user bucket
+(`@nestjs/throttler` — its distributed store would mean re-introducing Redis,
+which was removed with the presence cache in ADR 0007 — or a gateway-level
+limit). Deferred with the rest of the abuse surface, behind the missing
+authentication.
 
 ## Observations from load testing — known and unaddressed
 
@@ -108,10 +109,11 @@ Not scope decisions but facts surfaced by the ADR 0007 measurement
   latency spikes are the prime suspect. Unaddressed because diagnosis needs
   config changes (`log_min_duration_statement`, possibly `statement_timeout`)
   that were out of bounds during measurement; both are Phase 4 items.
-- **`/health` performs a real database ping and Redis ping per call**,
-  unauthenticated, plateauing at ~1k req/s on the reference box — an
-  amplification target. Unaddressed because rate limiting as a whole is a
-  non-goal (above); recorded so the token-bucket work covers it when it comes.
+- **`/health` performs a real database ping per call** (it also pinged Redis
+  until the cache removal), unauthenticated, plateauing at ~1k req/s on the
+  reference box — an amplification target. Unaddressed because rate limiting as
+  a whole is a non-goal (above); recorded so the token-bucket work covers it
+  when it comes.
 
 ## Antimeridian and pole-crossing polygons
 

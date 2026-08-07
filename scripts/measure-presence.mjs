@@ -1,18 +1,30 @@
-// Measurement harness for ADR 0007 (presence read strategy). Deliberately dependency-free
-// beyond what the app already ships (pg, ioredis). Closed-loop load: N workers, each a
-// sequential request loop over a keep-alive agent — in-flight concurrency is exactly N.
+// Measurement harness that produced docs/PRESENCE_READ_MEASUREMENT.md (ADR 0007).
+// Kept as the evidence of method and as the reusable load harness for future
+// measurements (polygon cache per ADR 0003's addendum, Phase 4 load work).
+// Closed-loop load: N workers, each a sequential request loop over a keep-alive
+// agent — in-flight concurrency is exactly N.
 //
 // Usage:
 //   node scripts/measure-presence.mjs floors            # harness floor: 404 route + /health
 //   node scripts/measure-presence.mjs strategy <label>  # workloads a+b at all concurrency levels
 //
-// The server must already be running (node dist/main) with PRESENCE_READ_STRATEGY=<label>.
+// The server must already be running (node dist/main). <label> tags the output rows.
+// Historical note: the original runs compared three presence-read strategies switched
+// by a PRESENCE_READ_STRATEGY env var; the losing paths and the flag were removed
+// (ADR 0007), so today there is only the folded path to measure. Redis metrics are
+// collected only if ioredis is installed (it was removed with the presence cache).
 
 import http from 'node:http';
 import { hrtime } from 'node:process';
 import { Client } from 'pg';
-import Redis from 'ioredis';
 import { config } from 'dotenv';
+
+let Redis = null;
+try {
+  ({ default: Redis } = await import('ioredis'));
+} catch {
+  // ioredis not installed — redis metrics disabled, everything else works.
+}
 
 config();
 
@@ -34,12 +46,14 @@ const pgClient = new Client({
   database: process.env.POSTGRES_DB,
 });
 
-const redis = new Redis({
-  host: process.env.REDIS_HOST,
-  port: parseInt(process.env.REDIS_PORT, 10),
-  lazyConnect: true,
-  enableOfflineQueue: false,
-});
+const redis = Redis
+  ? new Redis({
+      host: process.env.REDIS_HOST ?? '127.0.0.1',
+      port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
+      lazyConnect: true,
+      enableOfflineQueue: false,
+    })
+  : null;
 
 const rand = (n) => Math.floor(Math.random() * n);
 const insidePoint = () => ({ lng: 13 + Math.random() * 4, lat: 13 + Math.random() * 4 });
@@ -153,6 +167,7 @@ async function withPgSampling(promise) {
 }
 
 async function redisStats() {
+  if (!redis) throw new Error('ioredis not installed');
   const parse = (info) =>
     Object.fromEntries(
       info
@@ -200,7 +215,9 @@ async function setupState() {
                                    ${AREA.lngMin} ${AREA.latMin}))', 4326))`,
     );
   }
-  await redis.flushdb().catch(() => {});
+  if (redis) {
+    await redis.flushdb().catch(() => {});
+  }
 }
 
 async function warmAllUsersInside() {
@@ -230,7 +247,9 @@ const workloads = {
 async function main() {
   const [mode, label] = process.argv.slice(2);
   await pgClient.connect();
-  await redis.connect().catch(() => {});
+  if (redis) {
+    await redis.connect().catch(() => {});
+  }
 
   if (mode === 'floors') {
     for (const [name, fn, ok] of [
@@ -261,7 +280,7 @@ async function main() {
   }
 
   await pgClient.end();
-  redis.disconnect();
+  redis?.disconnect();
   agent.destroy();
 }
 

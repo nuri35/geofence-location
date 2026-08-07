@@ -43,7 +43,8 @@ Postgres round-trip/pool contention at load, not on raw read cost.
 
 ## Decision
 
-**`folded` is the default.** Measured under closed-loop load (10/50/200/500
+**`folded` is the implementation — the cache and the two-step baseline were
+removed after losing.** Measured under closed-loop load (10/50/200/500
 in-flight, 10,000 users, both workload shapes — full method, curves and caveats
 in docs/PRESENCE_READ_MEASUREMENT.md):
 
@@ -62,9 +63,24 @@ in docs/PRESENCE_READ_MEASUREMENT.md):
   transaction; zero errors at every level); the app tier saturates first at
   ~1.3–1.6 k req/s on this box.
 
-The `cache` and `two-step` paths and the `PRESENCE_READ_STRATEGY` flag are
-**kept, not deleted**: the decision is recorded with evidence and stays
-reversible with a flag flip, not a rebuild.
+The `cache` and `two-step` paths and the `PRESENCE_READ_STRATEGY` flag were
+initially kept behind the flag for reversibility, then **removed entirely**
+(same day) for a second, independent reason found in review: **the shipped
+cache path had a correctness hole.** Cache invalidations are best-effort
+(swallowed on failure) by design; a Redis outage spanning a transition
+therefore loses both the in-transaction and post-commit invalidations. After
+recovery the stale key is served as a *hit under the lock* and used as
+`previous`. The phantom-entry direction is absorbed by `ON CONFLICT`, but the
+suppression direction is not: a stale set containing an area the database no
+longer has suppresses the entry log when the user re-enters, until some
+differing sample heals the key. That falsifies "losing Redis costs latency,
+never correctness" for the cache path; fixing it needs verify-on-hit or TTL
+semantics — machinery not worth building for a path the measurement had
+already rejected. The cache was a reasonable hypothesis, tested properly, and
+rejected on two independent grounds; reversibility now lives in this ADR, the
+measurement document, and git history rather than in dormant code. The Redis
+infrastructure (compose service, client module, health probe, env vars) left
+with it — nothing else used Redis.
 
 Precision about what a topology change can and cannot change: the cache read
 must happen under the advisory lock, and the lock is acquired **in Postgres** —
@@ -88,10 +104,9 @@ is architectural and should transfer; the absolute numbers should not.
 
 ## Consequences
 
-- Default `PRESENCE_READ_STRATEGY=folded` (Joi default, `.env.example`, README).
-- Three code paths remain in `LocationsService.lockAndReadPrevious` behind the
-  flag; the full e2e suite runs under any of them via the env var.
-- The plpgsql function `lock_user_and_read_presence` is now on the hot path;
+- `LocationsService` has exactly one presence-read path; the strategy flag, its
+  config surface, the cache service, and the Redis infrastructure are gone.
+- The plpgsql function `lock_user_and_read_presence` is the hot path;
   its lock-before-read ordering is documented plpgsql semantics, verified by
   the blocking experiment recorded in this ADR's Candidates section.
 - Revisit trigger, stated precisely: a remote database re-opens **`cache` vs

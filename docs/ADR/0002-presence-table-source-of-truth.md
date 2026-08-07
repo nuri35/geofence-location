@@ -125,3 +125,16 @@ Negative / accepted honestly:
   future move to session-scoped advisory locks or a pooler that multiplexes
   mid-transaction breaks the serialization silently. Noted, not solved;
   `ON CONFLICT` remains the correctness backstop either way.
+
+## Addendum (2026-08-07)
+
+The read-through cache described above was built, measured
+(docs/PRESENCE_READ_MEASUREMENT.md), and **removed** — ADR 0007 records both
+reasons: it lost the measurement, and review found a correctness hole
+(invalidations lost across a Redis outage leave a stale key that is served as a
+hit under the lock and can suppress a genuine re-entry log). The
+**cache-under-lock constraint stays recorded here deliberately**: it is the
+minimum bar any future presence cache must clear, and the stale-hit hole is the
+second requirement (verify-on-hit or TTL) discovered after this ADR was
+written. PostgreSQL as the sole source of truth — this ADR's actual decision —
+is unchanged and is now also the only presence-read implementation.

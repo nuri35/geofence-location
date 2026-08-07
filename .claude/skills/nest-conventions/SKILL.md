@@ -14,16 +14,17 @@ TypeScript 5.9 strict (verified via `npm ls` and tsconfig).
 src/config/     the ONLY place allowed to read process.env (see below)
 src/common/     cross-cutting: filters/, interceptors/, decorators/, dto/ — each with an index.ts barrel
 src/health/     GET /health (Terminus) — pattern for a feature module: *.module.ts + *.controller.ts + *.constants.ts
-src/redis/      global provider module — pattern for wrapping an external client
 src/migrations/ TypeORM migrations (see typeorm-migrations skill)
 ```
 
 Feature modules own their constants file (`health.constants.ts`,
-`redis.constants.ts`). No magic strings: string-y identifiers live in enums or
-exported constants — existing ones are `ConfigNamespace`, `EnvKey`,
-`NodeEnvironment` (src/config/config.constants.ts), `SWAGGER_PATH` (src/main.ts),
-`HEALTH_INDICATOR_DATABASE`, `REDIS_CLIENT` (a `Symbol`), and
-`SKIP_RESPONSE_TRANSFORM_KEY`.
+`areas.constants.ts`, `locations.constants.ts`). No magic strings: string-y
+identifiers live in enums or exported constants — existing ones are
+`ConfigNamespace`, `EnvKey`, `NodeEnvironment` (src/config/config.constants.ts),
+`SWAGGER_PATH` (src/main.ts), `HEALTH_INDICATOR_DATABASE`, and
+`SKIP_RESPONSE_TRANSFORM_KEY`. (A `src/redis/` module with a `REDIS_CLIENT`
+Symbol existed as the external-client wrapper pattern until the presence cache
+was removed — ADR 0007; see git history if that pattern is needed again.)
 
 ## The config rule (enforced by convention — check it in review)
 
@@ -33,15 +34,15 @@ exported constants — existing ones are `ConfigNamespace`, `EnvKey`,
 
 1. Inject a namespace into a factory: `inject: [databaseConfig.KEY]` with
    `(db: ConfigType<typeof databaseConfig>) => …` — see `TypeOrmModule.forRootAsync`
-   in src/app.module.ts and the provider factory in src/redis/redis.module.ts.
+   in src/app.module.ts.
 2. `configService.getOrThrow<AppConfig>(ConfigNamespace.App)` — see src/main.ts.
 3. New env vars: add to `EnvKey`, to the Joi schema in src/config/env.validation.ts,
    to `.env.example` (documented), and to the README env table. **Required vars get
-   `.required()` and NO default** — infra coordinates (all `POSTGRES_*`,
-   `REDIS_HOST`, `REDIS_PORT`) must never be guessed. Missing → boot aborts with
+   `.required()` and NO default** — infra coordinates (all `POSTGRES_*`) must never
+   be guessed. Missing → boot aborts with
    `Config validation error: "POSTGRES_PASSWORD" is required` (verified by removing
-   the var and booting). Only genuinely optional vars (`NODE_ENV`, `PORT`,
-   `REDIS_PASSWORD`) carry defaults. In factories, read required vars via
+   the var and booting). Only genuinely optional vars (`NODE_ENV`, `PORT`) carry
+   defaults. In factories, read required vars via
    `requireEnv(EnvKey.X)` (src/config/env.util.ts) — it treats `''` as missing,
    matching Joi.
 

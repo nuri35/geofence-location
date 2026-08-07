@@ -17,7 +17,7 @@ observable state throughout; scenario 13 asserts the response body itself.
 | --- | --- |
 | 1–8 | `test/locations.e2e-spec.ts` — test names carry the scenario number verbatim (e.g. "4. logs a second entry after exit and re-entry"; 8 is the 20-way concurrent race) |
 | 9 | `test/locations.e2e-spec.ts` — "9. persists observedAt verbatim without letting it affect the outcome" |
-| 10 | Runtime verification, not a fixed spec: `docker compose stop redis` + the locations/areas suites under `PRESENCE_READ_STRATEGY=cache` (24 tests green with Redis dead, recorded in the Phase 3 verification); cache observables in `test/presence-cache.e2e-spec.ts` |
+| 10 | Retired (see the scenario) — was verified while the cache existed: container stopped, 24 tests green, recorded in the Phase 3 trail; the cache and its spec were removed by ADR 0007 |
 | 11 | `test/areas.e2e-spec.ts` — "rejects a self-intersecting bowtie with 400 carrying ST_IsValidReason, storing nothing" + "rejects an unclosed ring with 400 at the DTO layer" |
 | 12 | `test/locations.e2e-spec.ts` — "12. rejects out-of-range coordinates and oversized userId with 400"; `test/areas.e2e-spec.ts` — "rejects out-of-range coordinates with 400" |
 | 13 | `test/locations.e2e-spec.ts` — "13. returns 201 naming exactly the areas entered, then an empty array" |
@@ -93,18 +93,15 @@ mid-transaction failure rolls back the presence write).
   U's log row carries the supplied `observed_at` verbatim; V's carries null.
   Both rows' `recorded_at` are server-assigned.
 
-## 10. preserves all transition semantics with Redis unavailable
+## 10. preserves all transition semantics with Redis unavailable — RETIRED
 
-Phase 3's central scenario (transferred from Phase 2, which had no Redis
-integration to disable): verified by actually stopping the container and
-running the full suite under `PRESENCE_READ_STRATEGY=cache` — not mocked.
-
-- **Setup**: stop the Redis container (`docker compose stop redis`), cache
-  strategy active.
-- **Sequence**: re-run the sequences of scenarios 2, 3, 4, and 8.
-- **Expected**: identical log and presence outcomes; no request fails with a
-  5xx. Only latency may differ — decision 6: losing Redis costs latency, never
-  correctness. `/health` stays 200 with `redis: down` reported.
+Retired 2026-08-07. This scenario was predicated on the Redis presence cache,
+which was built, measured, and removed (ADR 0007). While the cache existed, the
+scenario was verified for real — container stopped, 24 tests green — and that
+verification is on record in the Phase 3 trail. In the adopted design
+correctness never depends on any store but PostgreSQL (ADR 0002), so the
+scenario's obligation is discharged structurally: there is no Redis to lose.
+Kept under its number so the map below and historical references stay valid.
 
 ## 11. rejects an invalid polygon with 400 and stores nothing
 
