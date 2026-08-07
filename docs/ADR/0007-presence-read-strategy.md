@@ -64,9 +64,23 @@ in docs/PRESENCE_READ_MEASUREMENT.md):
 
 The `cache` and `two-step` paths and the `PRESENCE_READ_STRATEGY` flag are
 **kept, not deleted**: the decision is recorded with evidence and stays
-reversible — a deployment where Redis is co-located with the app while Postgres
-is remote inverts the round-trip arithmetic, and re-measuring there is a flag
-flip, not a rebuild.
+reversible with a flag flip, not a rebuild.
+
+Precision about what a topology change can and cannot change: the cache read
+must happen under the advisory lock, and the lock is acquired **in Postgres** —
+so the cache never removes a Postgres round trip; it adds a Redis one on top:
+
+    folded:      lock + presence read in ONE Postgres round trip
+    cache hit:   lock (a Postgres round trip) + a Redis round trip
+
+On a remote database both paths pay the same Postgres latency and the cache
+still pays Redis on top. What rising database latency actually changes is the
+comparison against `two-step`, whose presence read is its own second Postgres
+round trip — there the cache does win as latency rises. **A remote database
+makes the cache beat `two-step`, not `folded`.** The condition under which the
+cache would beat `folded` is different: the lock itself would have to move off
+the hot path (a different concurrency design), which this design deliberately
+does not do.
 
 Conditions and limits: single box (Windows/WSL2 Docker), localhost networking,
 synthetic uniform load, default pool of 10, 12 s windows. The ranking argument
@@ -80,6 +94,10 @@ is architectural and should transfer; the absolute numbers should not.
 - The plpgsql function `lock_user_and_read_presence` is now on the hot path;
   its lock-before-read ordering is documented plpgsql semantics, verified by
   the blocking experiment recorded in this ADR's Candidates section.
-- Revisit trigger: any topology change that adds real network distance between
-  the app and Postgres, or a measured pool-contention regime — re-run
-  `scripts/measure-presence.mjs` and re-decide.
+- Revisit trigger, stated precisely: a remote database re-opens **`cache` vs
+  `two-step` only** — `folded` keeps its lead at any Postgres latency, because
+  both pay the lock's Postgres round trip and the cache adds Redis on top.
+  Re-run `scripts/measure-presence.mjs` and re-decide if `folded` itself ever
+  becomes unavailable (e.g. an environment that cannot ship the plpgsql
+  function), if the lock design changes such that the lock leaves the hot
+  path, or on a measured pool-contention regime.

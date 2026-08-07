@@ -114,7 +114,13 @@ invalidation traffic inside the locked transaction.
 One box (Windows/WSL2 Docker) running generator + Node + Postgres + Redis;
 localhost networking (no real network latency — a remote Redis or DB changes the
 round-trip arithmetic materially); synthetic load with uniform users; 12 s
-windows; pool size left at default 10. The *ranking* argument (folded removes a
+windows; pool size left at default 10.
+
+> Annotation (2026-08-07): "changes the arithmetic" above is made precise in
+> ADR 0007's revisit trigger — a remote database re-opens `cache` vs `two-step`
+> only. `folded` keeps its lead at any Postgres latency, because the lock is a
+> Postgres round trip both paths must pay, and the cache's Redis hop is additive
+> to it, not a replacement for it. The *ranking* argument (folded removes a
 round trip unconditionally; cache adds hops inside the lock) is
 architecture-driven and should transfer; the absolute numbers should not be
 quoted beyond this setup.

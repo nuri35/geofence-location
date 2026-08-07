@@ -84,3 +84,31 @@ Negative / accepted honestly:
 - `ST_Covers` on shared boundaries means a point on the border between two
   adjacent areas is inside both — consistent with decision 5, but worth knowing
   when reading logs.
+
+## Addendum (2026-08-07, after the ADR 0007 measurement)
+
+The presence-cache measurement (docs/PRESENCE_READ_MEASUREMENT.md) sharpened
+this ADR's "until measured" qualifier into one coherent position on caching.
+Presence proved a poor cache target: per-user, changed on every transition, and
+readable only under the advisory lock — invalidation churn collapsed its hit
+rate from 99.7% to 0.50–0.78 in the transition-heavy workload. The **area
+polygons are the opposite on every axis**: near-static, small, identical for
+every user, and read outside any lock. An in-process polygon cache invalidated
+on `POST /areas` — exactly the "application-layer point-in-polygon" alternative
+this ADR keeps open — would remove the spatial query from the request path
+entirely, a larger saving than any presence cache could offer.
+
+It stays unimplemented, deliberately:
+
+1. The measured bottleneck is the Node app tier, not database access — a bare
+   404 route ceilings at ~5,500 req/s while every strategy sits near 1,600, so
+   removing this round trip runs into the same wall.
+2. With multiple app instances, a polygon change must invalidate every
+   instance's cache — that needs a broadcast signal (Redis pub/sub), a new
+   architectural component, not a tuning change.
+3. Building it without measuring would repeat exactly the mistake the
+   presence-cache measurement caught.
+
+The revisit condition above stands unchanged — when the per-request round trip
+is a *measured* bottleneck — now with the added knowledge of **which** cache to
+build when that day comes, and what it costs.

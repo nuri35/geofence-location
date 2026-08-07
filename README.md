@@ -56,9 +56,27 @@ sits inside the locked transaction by correctness requirement). The bottleneck a
 saturation was the Node app tier, not database access: the 10-connection pool sat
 mostly idle-in-transaction with zero errors at every level. **Topology caveat**: these
 numbers were taken with generator, app, Postgres and Redis on one box — same-host
-database, warm connection pool. A remote database (real network round trips) would
-likely invert the cache result; that is exactly the condition under which to re-run
-`scripts/measure-presence.mjs` and re-decide via the flag.
+database, warm connection pool. A remote database changes one comparison only: the
+cache would beat `two-step` (whose presence read is its own round trip) as latency
+rises — but not `folded`, because the cache read sits under the advisory lock, which
+is itself a Postgres round trip; the cache adds a Redis hop on top of that trip
+rather than replacing it. Re-measure with `scripts/measure-presence.mjs` if the lock
+design ever changes.
+
+**The measurement also showed presence was the wrong thing to cache.** Presence
+changes on every transition, is per-user, and must be read under a lock —
+invalidation churn is exactly what collapsed the hit rate from 99.7% to 0.50–0.78.
+The right cache target is the **area polygons**: near-static, small, identical for
+every user, read outside any lock. An in-process polygon cache invalidated on
+`POST /areas` would remove the spatial query from the request path entirely — a
+larger saving than anything the presence cache could offer. It is deliberately not
+implemented: the measured bottleneck is the Node event loop, not database access (a
+bare 404 route ceilings at ~5,500 req/s while every strategy sits near 1,600, so the
+saved round trip runs into the same wall); with multiple app instances a polygon
+change must invalidate every instance's cache, which needs a broadcast signal (Redis
+pub/sub — a new architectural component, not a tuning change); and adding it without
+measuring would repeat exactly the mistake the presence-cache measurement caught.
+The standing revisit condition lives in [ADR 0003](docs/ADR/0003-spatial-query-strategy.md).
 
 ## Stack
 
