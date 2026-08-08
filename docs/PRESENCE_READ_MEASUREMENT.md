@@ -11,6 +11,23 @@ Server: the real prod artifact (`node dist/main`), restarted per strategy with
 `PRESENCE_READ_STRATEGY` set. Same box runs generator, Node server, Postgres and
 Redis containers (WSL2) — a deliberate limitation, stated below.
 
+> **Annotation (2026-08-08) — the closed-loop qualifier, read this before taking
+> any throughput number elsewhere.** A closed-loop harness self-throttles: workers
+> wait for responses, so overload can only ever surface as rising latency — never
+> as queue explosion. An open-loop world (clients sending at a fixed rate
+> regardless of responses) behaves differently above the ~1,600 req/s sustained
+> ceiling: the pre-bounds system would have grown unbounded queues, and even with
+> ADR 0009's bounds in place the system *sheds* load beyond the ceiling rather
+> than absorbing it. Every number in this document carries that qualifier.
+
+> **Annotation (2026-08-08) — measurement baseline**, read from the machine, so a
+> re-run of `scripts/measure-presence.mjs` elsewhere has something to compare
+> drift against: AMD Ryzen 9 5900HX, 8 cores / 16 threads, 31.4 GB host RAM;
+> WSL2 Docker VM sees 16 vCPU / ~15.3 GiB; **no per-container CPU or memory
+> limits set**. Node v24.11.1; PostgreSQL 16.4, PostGIS 3.4.3
+> (`postgis/postgis:16-3.4`). Generator, app, Postgres (and Redis, then) all
+> co-located on this box.
+
 Side instrumentation, all external to the app (no logic changes):
 `pg_stat_activity` sampled at 5 Hz (connection states, lock waiters, transaction
 ages — a biased sampler for short transactions; treat transaction-age numbers as

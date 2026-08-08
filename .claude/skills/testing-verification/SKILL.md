@@ -75,8 +75,28 @@ Rules that follow:
    server, not evidence your change "didn't work" — check the port owner before
    debugging the code.
 3. After stopping a background `npm run start:dev` task, verify the port is
-   actually free — the stop is not proof on Windows.
+   actually free — the stop is not proof on Windows. **And freeing the port is
+   not the end of it** (migration audit, 2026-08-07): killing the watch *child*
+   leaves the `nest start --watch` *wrapper* alive, and any later file change
+   makes it rebuild and **respawn the old server mid-session** — this
+   contaminated a verification (curls answered by the wrong directory's build)
+   and was caught only by re-checking the port owner's command line. Kill the
+   wrapper too (`Get-CimInstance Win32_Process | Where CommandLine -match
+   'nest.js. start'`), and re-verify the port owner before every HTTP
+   conclusion, not just after the kill.
 
 Related port trap: this machine also runs a native PostgreSQL on 5432, so `.env`
 here uses `POSTGRES_PORT=5433`. A DB auth failure with correct credentials means
 you may be talking to the wrong server entirely.
+
+## Never trust wall-clock through `docker exec`
+
+`docker exec` costs **3.5–8 s of startup** on this machine, and it inverted an
+experimental conclusion once (Phase 3, 2026-08-07): the naive lock fold appeared
+to block correctly under `time docker exec psql …` — the "blocking" was exec
+startup — until server-side timing exposed a plan that skipped the lock entirely
+(`Function Scan on pg_advisory_xact_lock … never executed`). Rule: timing
+evidence comes from instruments that measure inside or alongside the server —
+`EXPLAIN ANALYZE` (Execution Time includes lock waits), psql `\timing` within a
+session, or in-process `hrtime` in a Node script. Wall-clock around `docker exec`
+is startup noise wearing a result's clothes.
