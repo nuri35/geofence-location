@@ -18,10 +18,10 @@ observable state throughout; scenario 13 asserts the response body itself.
 | 1–8 | `test/locations.e2e-spec.ts` — test names carry the scenario number verbatim (e.g. "4. logs a second entry after exit and re-entry"; 8 is the 20-way concurrent race) |
 | 9 | `test/locations.e2e-spec.ts` — "9. persists observedAt verbatim without letting it affect the outcome" |
 | 10 | Retired (see the scenario) — was verified while the cache existed: container stopped, 24 tests green, recorded in the Phase 3 trail; the cache and its spec were removed by ADR 0007 |
-| 11 | `test/areas.e2e-spec.ts` — "rejects a self-intersecting bowtie with 400 carrying ST_IsValidReason, storing nothing" + "rejects an unclosed ring with 400 at the DTO layer" |
-| 12 | `test/locations.e2e-spec.ts` — "12. rejects out-of-range coordinates and oversized userId with 400"; `test/areas.e2e-spec.ts` — "rejects out-of-range coordinates with 400" |
+| 11 | `test/areas.e2e-spec.ts` — "11. rejects a self-intersecting bowtie…" + "11. rejects an unclosed ring…" (test titles carry the scenario number) |
+| 12 | `test/locations.e2e-spec.ts` — "12. rejects out-of-range coordinates and oversized userId with 400"; `test/areas.e2e-spec.ts` — "12. rejects out-of-range coordinates with 400" |
 | 13 | `test/locations.e2e-spec.ts` — "13. returns 201 naming exactly the areas entered, then an empty array" |
-| 14 | `test/areas.e2e-spec.ts` — "rejects 1001 distinct vertices and accepts 1000" |
+| 14 | `test/areas.e2e-spec.ts` — "14. rejects 1001 distinct vertices and accepts 1000" |
 
 Beyond the scenarios, `test/locations.e2e-spec.ts` also proves the cascade
 (area delete removes presence and log rows) and transactionality (a forced

@@ -41,6 +41,16 @@ Jest 29 + ts-jest, Supertest 7. Two suites with different trust models.
   strategy flag, the Redis cache, and the Redis container are gone, so there is
   no Redis-down verification any more and the old "worker failed to exit"
   ioredis teardown nuisance went with them.
+- **e2e specs share one database AND one coordinate plane.** A spatial collision
+  broke the suite once (2026-08-07): a logs seed area overlapped the locations
+  cascade area, and `ST_Covers` counts the shared corner. Claimed lng ranges:
+  locations.e2e-spec owns 0..15 and 100..102, areas.e2e-spec 0..30, logs
+  150..170 — a new spec takes an unclaimed range and records it here.
+- **Known once-seen flake (Phase 4A, never reproduced across 4+ runs):** one
+  full-suite failure right after that coordinate fix, detail lost. Standing
+  suspect is cross-suite parallelism on the shared DB; known mitigation is
+  `npm run test:e2e -- --runInBand`. If an intermittent e2e failure appears,
+  suspect parallel-spec interference before anything else.
 
 ## The full green chain
 

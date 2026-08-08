@@ -1,10 +1,12 @@
 # Scope boundaries — known gaps, their cost, and the right fix
 
-Every non-goal in CLAUDE.md, expanded: what the gap is, what breaks because of
-it, and what the fix would be with more time. This document exists so that
-"didn't do it" reads as "chose not to do it and knows the cost". The choices
-themselves are constitutional (CLAUDE.md); this file only carries the reasoning
-and consequences.
+Every non-goal in CLAUDE.md expanded — what the gap is, what breaks because of
+it, and what the fix would be with more time — plus two later additions of the
+same species: observations from load testing that remain deliberately
+unaddressed, and optimisations deliberately deferred with their revisit
+conditions. This document exists so that "didn't do it" reads as "chose not to
+do it and knows the cost". The choices themselves are constitutional
+(CLAUDE.md); this file only carries the reasoning and consequences.
 
 ## Authentication and user identity trust
 

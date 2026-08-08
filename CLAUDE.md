@@ -94,7 +94,7 @@ The single source of truth for progress — phase documents carry no status fiel
 | 2 | Core (must not be cut): logs + `user_area_presence` tables, full `POST /locations` transition path — transaction + advisory lock + `ON CONFLICT` + exit-side deletion; every acceptance scenario becomes a test | Complete |
 | 3 | Redis read-through cache in front of presence + Redis health indicator. Explicitly cuttable — the architecture is correct without it | Complete, then reversed on evidence: cache built and measured (ADR 0007), rejected, and removed along with the Redis infrastructure |
 | 4 | `GET /logs` keyset pagination + its indexes, pool sizing, `statement_timeout`, load measurement with real numbers | Complete — 4A: strategy measurement + `GET /logs`; 4B: error contract (ADR 0008-adjacent fixes), connection/query bounds (ADR 0009). Full backpressure (HTTP admission control) deliberately not built — acquire timeout is its down payment |
-| 5 | README, Swagger, full green chain, manual audit of every acceptance scenario, clean-clone verification | In progress — README concurrency/capacity/degradation story done; manual acceptance audit, smoke test and clean-clone verification already performed and recorded; final polish pass pending |
+| 5 | README, Swagger, full green chain, manual audit of every acceptance scenario, clean-clone verification | Complete — all 14 scenarios manually audited against the prod artifact (zero contradictions), final clean clone from remote green end-to-end, Swagger reviewed (consumer gaps recorded in the phase 5 report), docs aligned |
 
 ## Session protocol
 

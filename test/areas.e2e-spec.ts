@@ -83,7 +83,7 @@ describe('Areas (e2e)', () => {
     expect(body.data.boundary.coordinates[0]).toHaveLength(5);
   });
 
-  it('rejects a self-intersecting bowtie with 400 carrying ST_IsValidReason, storing nothing', async () => {
+  it('11. rejects a self-intersecting bowtie with 400 carrying ST_IsValidReason, storing nothing', async () => {
     const bowtie = {
       type: 'Polygon',
       coordinates: [
@@ -108,7 +108,7 @@ describe('Areas (e2e)', () => {
     expect(areas.some((area) => area.name === 'bowtie')).toBe(false);
   });
 
-  it('rejects an unclosed ring with 400 at the DTO layer', async () => {
+  it('11. rejects an unclosed ring with 400 at the DTO layer', async () => {
     const response = await request(app.getHttpServer())
       .post('/areas')
       .send({
@@ -130,7 +130,7 @@ describe('Areas (e2e)', () => {
     expect(messageText(response.body as ErrorResponse)).toContain('not closed');
   });
 
-  it('rejects out-of-range coordinates with 400', async () => {
+  it('12. rejects out-of-range coordinates with 400', async () => {
     const outOfRange = [
       { lng: 0, lat: 91 },
       { lng: 181, lat: 0 },
@@ -158,7 +158,7 @@ describe('Areas (e2e)', () => {
     }
   });
 
-  it('rejects 1001 distinct vertices and accepts 1000', async () => {
+  it('14. rejects 1001 distinct vertices and accepts 1000', async () => {
     await request(app.getHttpServer())
       .post('/areas')
       .send({ name: 'cap-1001', boundary: { type: 'Polygon', coordinates: [circleRing(1001)] } })
