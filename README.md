@@ -138,6 +138,16 @@ structured body in **both** directions — 200 healthy and 503 unhealthy — so 
 per-dependency detail (`database: down`) survives exactly when an operator needs it.
 The contract is pinned by `test/errors.e2e-spec.ts`.
 
+**Transient overload returns `503` with `Retry-After: 5`** ([ADR 0009](docs/ADR/0009-connection-and-query-bounds.md)):
+when a request exceeds the pool-acquire bound (2 s), the statement ceiling (5 s), or
+its transaction is culled as idle (10 s), the response is
+`503 {"statusCode":503, ..., "message":"Service temporarily unavailable, retry later"}`
+with a `Retry-After` header. **Client guidance**: wait the header's value, then retry —
+retrying `POST /locations` is safe by design (duplicate entries are impossible: the
+`ON CONFLICT` arbiter absorbs them), and even without a retry a timed-out location
+report self-heals on the next ping. Do not retry immediately; the header value is
+chosen to land your retry after the stall that caused it.
+
 ## Scripts
 
 | Script                   | Purpose                                             |
@@ -187,3 +197,10 @@ Required variables have no fallback — the app refuses to start if one is missi
 | `POSTGRES_USER`     | yes      | —             | Postgres user                                |
 | `POSTGRES_PASSWORD` | yes      | —             | Postgres password                            |
 | `POSTGRES_DB`       | yes      | —             | Database name                                |
+| `POSTGRES_POOL_SIZE` | no      | `10`          | Connections per instance; `N × poolSize ≤ max_connections − 10` (ADR 0009) |
+| `POSTGRES_ACQUIRE_TIMEOUT_MS` | no | `2000`    | Pool-acquire bound; must be < statement timeout (ADR 0009) |
+| `POSTGRES_STATEMENT_TIMEOUT_MS` | no | `5000`  | Server-side statement ceiling; must be < idle-txn timeout (ADR 0009) |
+| `POSTGRES_IDLE_TXN_TIMEOUT_MS` | no | `10000`  | Kills transactions left idle by a hung app side (ADR 0009) |
+
+The three timeouts are ordering-validated at boot — a misordered combination refuses
+to start. The migration CLI deliberately carries none of these bounds.

@@ -15,6 +15,12 @@ interface ErrorResponseBody {
   message: string | string[];
 }
 
+const POSTGRES_QUERY_CANCELED = '57014';
+const POSTGRES_IDLE_TXN_KILLED = '25P03';
+const PG_POOL_ACQUIRE_TIMEOUT_MESSAGE = 'timeout exceeded when trying to connect';
+/** Pushed past the observed stall envelope (≤ 5 s) so retries land after it, not inside it. */
+const RETRY_AFTER_SECONDS = 5;
+
 /**
  * The API's single error instrument (fix from the 2026-08-07 smoke test). One
  * catch-all rather than a second filter beside the old @Catch(HttpException) one:
@@ -69,12 +75,59 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return;
     }
 
+    // ADR 0009: timeout classes are transient and retryable — a 500 miscommunicates
+    // both. Retry-After pushes the retry past the stall envelope instead of inviting
+    // one at the worst moment; retrying POST /locations is safe by construction
+    // (ON CONFLICT absorbs the duplicate, and a timed-out write self-heals on the
+    // next ping regardless).
+    if (this.isTransientTimeout(exception)) {
+      const detail = exception instanceof Error ? exception.message : String(exception);
+      this.logger.warn(`timeout on ${request.method} ${request.url}: ${detail}`);
+      response
+        .status(HttpStatus.SERVICE_UNAVAILABLE)
+        .setHeader('Retry-After', String(RETRY_AFTER_SECONDS));
+      response.json(
+        this.body(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          request.url,
+          'Service temporarily unavailable, retry later',
+        ),
+      );
+      return;
+    }
+
     const detail = exception instanceof Error ? exception.message : String(exception);
     const stack = exception instanceof Error ? exception.stack : undefined;
     this.logger.error(`unhandled exception on ${request.method} ${request.url}: ${detail}`, stack);
     response
       .status(HttpStatus.INTERNAL_SERVER_ERROR)
       .json(this.body(HttpStatus.INTERNAL_SERVER_ERROR, request.url, 'Internal server error'));
+  }
+
+  /**
+   * The three bounded-timeout signatures (ADR 0009): Postgres 57014 (query_canceled —
+   * statement_timeout, including advisory-lock waits), 25P03 (idle-in-transaction
+   * session kill), and pg-pool's acquire timeout, which carries no code and is
+   * matched by its exact message. TypeORM wraps driver errors, so the code may sit
+   * on the exception or on its driverError.
+   */
+  private isTransientTimeout(exception: unknown): boolean {
+    if (typeof exception !== 'object' || exception === null) {
+      return false;
+    }
+    const candidate = exception as {
+      code?: unknown;
+      driverError?: { code?: unknown };
+      message?: unknown;
+    };
+    const code = candidate.driverError?.code ?? candidate.code;
+    if (code === POSTGRES_QUERY_CANCELED || code === POSTGRES_IDLE_TXN_KILLED) {
+      return true;
+    }
+    return (
+      typeof candidate.message === 'string' &&
+      candidate.message.includes(PG_POOL_ACQUIRE_TIMEOUT_MESSAGE)
+    );
   }
 
   /** http-errors convention used by Express middleware: expose=true marks the message client-safe. */

@@ -64,6 +64,7 @@ Numbered, append-only. One or two sentences here; the reasoning lives in the ADR
 13. `GET /areas` returns full geometry as GeoJSON with plain `limit`/`offset` — acceptable because the table is small and nearly static; the two read endpoints differ by decision, not accident. — [ADR 0006](docs/ADR/0006-read-endpoint-pagination.md)
 14. `user_id` is `varchar(64)` — free-form, since auth is a non-goal (identity is a claim, not a verified fact), but bounded so the column and the advisory-lock hash have a defined input.
 15. The presence read is `folded` — lock+read in one round trip via the `lock_user_and_read_presence` plpgsql function, the only implementation. Decided by measurement (+15–20% over a two-step baseline in both workloads at every concurrency level, while a Redis cache lost to baseline under transitions); the losing paths and their strategy flag were then removed — the decision stays reversible through the ADR, the measurement doc, and git history, not through dormant code. — [ADR 0007](docs/ADR/0007-presence-read-strategy.md)
+16. Connection and query bounds are deliberate and ordering-enforced at boot: pool acquire 2 s < statement ceiling 5 s < idle-in-transaction kill 10 s, pool size 10 per instance (explicit, env-configurable). Timeout classes return 503 with `Retry-After: 5`, never 500; the migration CLI carries no bounds. — [ADR 0009](docs/ADR/0009-connection-and-query-bounds.md)
 
 ## Hard constraints
 
@@ -91,7 +92,7 @@ The single source of truth for progress — phase documents carry no status fiel
 | 1 | Areas: table + migration + GIST index, `POST`/`GET /areas`, `ST_IsValid` gating, vertex cap; point-in-polygon query proven in isolation with `EXPLAIN ANALYZE` on the real query shape | Complete |
 | 2 | Core (must not be cut): logs + `user_area_presence` tables, full `POST /locations` transition path — transaction + advisory lock + `ON CONFLICT` + exit-side deletion; every acceptance scenario becomes a test | Complete |
 | 3 | Redis read-through cache in front of presence + Redis health indicator. Explicitly cuttable — the architecture is correct without it | Complete, then reversed on evidence: cache built and measured (ADR 0007), rejected, and removed along with the Redis infrastructure |
-| 4 | `GET /logs` keyset pagination + its indexes, pool sizing, `statement_timeout`, load measurement with real numbers | In progress — 4A done: strategy measurement (docs/PRESENCE_READ_MEASUREMENT.md) + `GET /logs` with `idx_logs_recorded_id`; 4B pending: pool sizing, `statement_timeout`, backpressure |
+| 4 | `GET /logs` keyset pagination + its indexes, pool sizing, `statement_timeout`, load measurement with real numbers | Complete — 4A: strategy measurement + `GET /logs`; 4B: error contract (ADR 0008-adjacent fixes), connection/query bounds (ADR 0009). Full backpressure (HTTP admission control) deliberately not built — acquire timeout is its down payment |
 | 5 | README, Swagger, full green chain, manual audit of every acceptance scenario, clean-clone verification | Not started |
 
 ## Session protocol

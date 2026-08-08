@@ -6,20 +6,24 @@ describe('AllExceptionsFilter', () => {
   let filter: AllExceptionsFilter;
   const status = jest.fn();
   const json = jest.fn();
+  const setHeader = jest.fn();
+  const responseMock = { status, json, setHeader };
   const host = {
-    switchToHttp: () => ({
-      getResponse: () => ({ status }),
-      getRequest: () => ({ url: '/test-path', method: 'POST' }),
+    switchToHttp: (): unknown => ({
+      getResponse: (): unknown => responseMock,
+      getRequest: (): unknown => ({ url: '/test-path', method: 'POST' }),
     }),
   } as unknown as ArgumentsHost;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    status.mockReturnValue({ json });
+    status.mockReturnValue(responseMock);
+    setHeader.mockReturnValue(responseMock);
     filter = new AllExceptionsFilter();
   });
 
-  const sentBody = (): Record<string, unknown> => json.mock.calls[0][0] as Record<string, unknown>;
+  const sentBody = (): Record<string, unknown> =>
+    (json.mock.calls as unknown[][])[0][0] as Record<string, unknown>;
 
   it('shapes a standard HttpException into the house body', () => {
     filter.catch(new BadRequestException(['lat out of range']), host);
@@ -77,6 +81,43 @@ describe('AllExceptionsFilter', () => {
     expect(JSON.stringify(body)).not.toContain('ECONNREFUSED');
     expect(JSON.stringify(body)).not.toContain('user_area_presence');
     expect(JSON.stringify(body)).not.toContain('secret');
+  });
+
+  describe('transient timeouts → 503 with Retry-After (ADR 0009)', () => {
+    it('maps statement_timeout (57014, wrapped by TypeORM) without leaking driver detail', () => {
+      const wrapped = Object.assign(new Error('canceling statement due to statement timeout'), {
+        driverError: Object.assign(new Error('canceling statement due to statement timeout'), {
+          code: '57014',
+        }),
+        query: 'SELECT "area_id" FROM lock_user_and_read_presence($1)',
+      });
+      filter.catch(wrapped, host);
+
+      expect(status).toHaveBeenCalledWith(503);
+      expect(setHeader).toHaveBeenCalledWith('Retry-After', '5');
+      expect(sentBody()).toMatchObject({
+        statusCode: 503,
+        path: '/test-path',
+        message: 'Service temporarily unavailable, retry later',
+      });
+      expect(JSON.stringify(sentBody())).not.toContain('lock_user_and_read_presence');
+      expect(JSON.stringify(sentBody())).not.toContain('canceling statement');
+    });
+
+    it('maps the pool acquire timeout by its exact message', () => {
+      filter.catch(new Error('timeout exceeded when trying to connect'), host);
+
+      expect(status).toHaveBeenCalledWith(503);
+      expect(setHeader).toHaveBeenCalledWith('Retry-After', '5');
+      expect(sentBody().message).toBe('Service temporarily unavailable, retry later');
+    });
+
+    it('maps an idle-in-transaction session kill (25P03)', () => {
+      filter.catch(Object.assign(new Error('terminated'), { code: '25P03' }), host);
+
+      expect(status).toHaveBeenCalledWith(503);
+      expect(setHeader).toHaveBeenCalledWith('Retry-After', '5');
+    });
   });
 
   it('does not treat expose=false or 5xx middleware errors as client-safe', () => {
