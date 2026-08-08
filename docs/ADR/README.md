@@ -9,3 +9,4 @@
 | [0005](0005-time-and-ordering-policy.md) | Time and ordering policy | Accepted | 2026-08-07 |
 | [0006](0006-read-endpoint-pagination.md) | Read endpoint pagination: keyset for logs, offset for areas | Accepted | 2026-08-07 |
 | [0007](0007-presence-read-strategy.md) | Presence read strategy: folded lock+read wins | Accepted | 2026-08-07 |
+| [0008](0008-disable-migration-generate.md) | Disable `migration:generate`; schema SQL is written by hand | Accepted | 2026-08-08 |

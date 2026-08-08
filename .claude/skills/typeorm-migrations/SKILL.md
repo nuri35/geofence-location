@@ -31,17 +31,25 @@ with a matching `name` property — TypeORM matches source to the `migrations` t
 by that exact string. Get a timestamp with `date +%s%3N` (Bash). Timestamps order
 the chain; a new migration's timestamp must be greater than all committed ones.
 
-## Generated vs hand-written
+## Hand-written only — migration:generate is DISABLED (ADR 0008)
 
-- `npm run migration:generate -- src/migrations/<Name>` diffs entities against the
-  live DB — use it once entities exist, then **read the generated SQL before
-  committing**. For spatial DDL check: `geometry(Type,4326)` modifier present, GIST
-  index included (`@Index({ spatial: true })` on the entity), and no postgis system
-  objects (like `spatial_ref_sys`) in any drop.
-- Hand-write migrations with no entity diff (extensions, raw SQL, indexes on
-  expressions). Template: the existing migration in src/migrations/ —
-  `queryRunner.query('…')` in `up()`, lint note: an empty `down()` returns
-  `Promise.resolve()` (not `async` — `require-await` rejects await-less async).
+- **All migrations are written by hand.** `npm run migration:generate` refuses
+  with an explanation. Reason (measured, not theoretical): two live schema
+  objects are invisible to entity metadata — `chk_areas_boundary_valid` (CHECK,
+  undeclared on the entity) and `idx_logs_recorded_id` (`recorded_at DESC, id
+  DESC`; `@Index` cannot express DESC) — so generated SQL opens by DROPPING
+  both, and its `down()` recreates the index with inverted column order and no
+  DESC. Full evidence in docs/ADR/0008.
+- Template: any existing migration in src/migrations/ — `queryRunner.query('…')`
+  in `up()`, lint note: an empty `down()` returns `Promise.resolve()` (not
+  `async` — `require-await` rejects await-less async). For spatial DDL check:
+  `geometry(Type,4326)` modifier present, GIST index included.
+- After adding a migration file, add it to the explicit MIGRATIONS list in
+  test/global-setup.ts — a count guard there fails the e2e suite loudly if you
+  forget (a missing index/constraint migration used to pass silently).
+- Deliberate generate (large refactor only): `npm run typeorm -- migration:generate
+  <path>`, then strip every statement touching the two objects above and review
+  the rest line by line before committing.
 
 ## down() policy
 

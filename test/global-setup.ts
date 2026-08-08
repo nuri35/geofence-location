@@ -1,4 +1,6 @@
 import 'reflect-metadata';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { config } from 'dotenv';
 import { Client } from 'pg';
 import { DataSource } from 'typeorm';
@@ -15,8 +17,11 @@ import { CreateLogsRecordedIdIndex1786128051611 } from '../src/migrations/178612
 import { E2E_DATABASE_NAME } from './e2e-constants';
 
 // Migrations are imported explicitly (no glob: transform contexts resolve globs
-// unreliably). A new migration must be added here — the e2e suite failing on a
-// missing table is the reminder.
+// unreliably). A new migration must be added here BY HAND — and forgetting fails in
+// two very different ways (established by the migration audit, 2026-08-07): a missing
+// TABLE or FUNCTION fails the suite loudly, but a missing INDEX or CONSTRAINT passes
+// silently with a test schema that differs from production. The count guard below
+// exists to turn that silent case loud.
 const MIGRATIONS = [
   EnablePostgisExtension1786038977187,
   CreateAreasTable1786108207631,
@@ -59,6 +64,21 @@ const provisionE2eDatabase = async (): Promise<void> => {
     await dataSource.runMigrations();
   } finally {
     await dataSource.destroy();
+  }
+
+  // Plain fs, not a glob — globs not resolving in this transform context is exactly
+  // why the MIGRATIONS list above is manual in the first place.
+  const migrationsOnDisk = readdirSync(join(__dirname, '..', 'src', 'migrations')).filter((file) =>
+    file.endsWith('.ts'),
+  );
+  if (migrationsOnDisk.length !== MIGRATIONS.length) {
+    throw new Error(
+      `e2e migration list is out of sync: test/global-setup.ts lists ${MIGRATIONS.length} ` +
+        `migration(s) but src/migrations/ contains ${migrationsOnDisk.length} file(s). ` +
+        `Import the missing migration(s) and add them to the MIGRATIONS array in ` +
+        `test/global-setup.ts. Without this guard, a missing index or constraint migration ` +
+        `passes the suite silently against a schema that differs from production.`,
+    );
   }
 };
 

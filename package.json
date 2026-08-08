@@ -17,7 +17,7 @@
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli -d src/config/data-source.ts",
-    "migration:generate": "npm run typeorm -- migration:generate",
+    "migration:generate": "node -e \"console.error('migration:generate is DISABLED in this repo (ADR 0008): two live schema objects are invisible to entity metadata, so generated SQL opens by DELETING them —\\n  - chk_areas_boundary_valid  (CHECK ST_IsValid: the last defence against invalid polygons)\\n  - idx_logs_recorded_id      (recorded_at DESC, id DESC: measured 120x on GET /logs)\\nWrite the migration by hand instead — see .claude/skills/typeorm-migrations.\\nDeliberate escape hatch for a large refactor: npm run typeorm -- migration:generate <path>, then strip every statement touching the two objects above before committing (docs/ADR/0008).'); process.exit(1)\"",
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert"
   },

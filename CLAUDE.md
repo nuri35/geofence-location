@@ -70,6 +70,7 @@ Numbered, append-only. One or two sentences here; the reasoning lives in the ADR
 Prohibitions. Breaking one is a bug even if everything is green.
 
 - Never `synchronize: true` or `migrationsRun: true`; schema changes go through migrations only, and an executed migration is never edited — fix forward. (`typeorm-migrations`)
+- Schema SQL is written by hand — `migration:generate` is disabled and refuses: two live objects (`chk_areas_boundary_valid`, `idx_logs_recorded_id`) are invisible to entity metadata and generated SQL deletes them. — [ADR 0008](docs/ADR/0008-disable-migration-generate.md)
 - Nothing outside `src/config/` reads `process.env`. (`nest-conventions`)
 - Spatial parameters never go through TypeORM `.where()` object syntax — TypeORM does not transform them; write raw SQL with explicit `ST_*` calls and `ST_SetSRID(…, 4326)`. (`postgis-spatial` §4)
 - SRID 4326 is declared in all three places: column type modifier, insert, query parameter. (`postgis-spatial` §3)
