@@ -3,8 +3,10 @@
 A geofencing API built on NestJS + PostgreSQL/PostGIS. Users report coordinates
 (`POST /locations`); when a user **enters** a predefined geographic area, exactly one
 event is logged with user, area, and timestamp — under high concurrent load, without
-duplicates. Areas are managed as GeoJSON polygons (`POST /areas`, `GET /areas`);
-`GET /logs` (keyset-paginated) is the remaining planned endpoint.
+duplicates. Areas are managed as GeoJSON polygons (`POST /areas`, `GET /areas`); the
+entry log is queryable via `GET /logs` (keyset-paginated). How the system behaves
+under load — the case's central requirement — is answered in
+[one place below](#under-load--concurrency-capacity-degradation).
 
 Decisions and project state live in [CLAUDE.md](CLAUDE.md); reasoning lives in
 [docs/ADR/](docs/ADR/README.md); working conventions live in [.claude/](.claude/README.md).
@@ -41,44 +43,122 @@ counts as inside, [ADR 0003](docs/ADR/0003-spatial-query-strategy.md)); polygons
 validated structurally at the DTO layer and geometrically with `ST_IsValid` before
 any row is stored, plus a database `CHECK` constraint as backstop.
 
-**The presence read was decided by measurement, not taste**
-([ADR 0007](docs/ADR/0007-presence-read-strategy.md), full method and curves in
-[docs/PRESENCE_READ_MEASUREMENT.md](docs/PRESENCE_READ_MEASUREMENT.md)). Three
-implementations were built and compared under closed-loop load (10–500 in-flight,
-10,000 users): a two-step baseline, a **folded** path (lock + presence read in one
-round trip via a plpgsql function), and a Redis read-through **cache**. `folded` won
-everywhere — +15–20% throughput over baseline in both workload shapes (e.g. 1,605 vs
-1,393 req/s static, 1,394 vs 1,230 req/s transition-heavy at 500 in-flight). The
-Redis cache was **built, measured, and removed**: it helps a static workload (+7% at
-a 99.7% hit rate) but hurts under transitions (−13 to −18% below baseline —
-invalidation churn, and the Redis hop sits inside the locked transaction by
-correctness requirement), and review then found a correctness hole in the cache path
-(a Redis outage spanning a transition leaves a stale key that can suppress a genuine
-re-entry log — ADR 0007). The losing paths and the Redis infrastructure were removed;
-`folded` is the only implementation, and the decision stays reversible through the
-documents and git history. The bottleneck at saturation was the Node app tier, not
-database access: the 10-connection pool sat mostly idle-in-transaction with zero
-errors at every level. **Topology caveat**: these numbers were taken with generator,
-app, Postgres and Redis on one box — same-host database, warm connection pool. A
-remote database changes one comparison only: a cache would beat *two-step* (whose
-presence read is its own round trip) as latency rises — but not `folded`, because
-any presence cache must be read under the advisory lock, which is itself a Postgres
-round trip; the cache adds a hop on top of that trip rather than replacing it.
+How the presence read is executed, and what was measured to decide it, lives in the
+load section below — the short version is that three implementations were built,
+raced, and the winner (`folded`, one round trip) kept.
 
-**The measurement also showed presence was the wrong thing to cache.** Presence
-changes on every transition, is per-user, and must be read under a lock —
-invalidation churn is exactly what collapsed the hit rate from 99.7% to 0.50–0.78.
-The right cache target is the **area polygons**: near-static, small, identical for
-every user, read outside any lock. An in-process polygon cache invalidated on
-`POST /areas` would remove the spatial query from the request path entirely — a
-larger saving than anything the presence cache could offer. It is deliberately not
-implemented: the measured bottleneck is the Node event loop, not database access (a
-bare 404 route ceilings at ~5,500 req/s while every strategy sits near 1,600, so the
-saved round trip runs into the same wall); with multiple app instances a polygon
-change must invalidate every instance's cache, which needs a broadcast signal (Redis
-pub/sub — a new architectural component, not a tuning change); and adding it without
-measuring would repeat exactly the mistake the presence-cache measurement caught.
-The standing revisit condition lives in [ADR 0003](docs/ADR/0003-spatial-query-strategy.md).
+## Under load — concurrency, capacity, degradation
+
+The case requires the system to "perform well under load and be capable of handling a
+large number of concurrent requests." That sentence contains two different problems —
+being *correct* when requests race, and having *capacity* when they pile up — plus a
+third the requirement implies: degrading in a bounded way when capacity runs out.
+This section answers all three, with numbers. Every number below was measured on one
+development box (Windows/WSL2 Docker, generator + app + Postgres co-located,
+same-host database, warm connection pool) via closed-loop load against the real
+production artifact — 10,000 distinct users, four concurrency levels, two workload
+shapes; full method in
+[docs/PRESENCE_READ_MEASUREMENT.md](docs/PRESENCE_READ_MEASUREMENT.md). The system
+has **not** been run at 10,000 req/s, and nothing here implies otherwise.
+
+### 1. Correctness under concurrency
+
+Concurrent requests produce correct results because the deciding step lives in
+Postgres, not in application memory: the per-user advisory lock serializes one
+user's requests, `INSERT … ON CONFLICT DO NOTHING … RETURNING` is the arbiter of
+whether an entry log is written, and both sit in one transaction — state and log
+commit atomically or not at all. Measured, not asserted: twenty simultaneous
+identical requests produce exactly one log row (e2e, every run), and ten parallel
+requests fired by hand during the smoke test produced exactly one non-empty
+response and exactly the right rows.
+
+This property matters more than it looks, because **it is what makes horizontal
+scaling possible at all**. Nothing in the correctness path assumes a single
+process: two instances, or twenty, racing on the same user resolve identically,
+because the database arbitrates. The designs that would have broken here — an
+in-process cache, or Redis holding the presence state — were considered and
+rejected precisely on this ground ([ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md)
+records the four failure modes of Redis-as-truth).
+
+### 2. Capacity
+
+One Node process sustains **~1,600 req/s** on the reference box, with clean tails
+(p99 11 ms at 10 in-flight, 353 ms at 500) and zero errors. The bottleneck is the
+**Node event loop, not the database**: a bare 404 route on the same box ceilings at
+~5,500 req/s, and at full load the 10-connection pool sat with fewer than 2
+connections active — Postgres was mostly waiting for Node, not the reverse
+(connection demand ≈ 6.4 of 10).
+
+The scaling path is therefore horizontal, and the architecture already supports it
+(section 1 is the proof obligation, and it's discharged in the database). Its limit
+is arithmetic against Postgres: `N instances × pool size ≤ max_connections −
+~10 reserved`. Concretely, at the default pool of 10 and the container's default
+`max_connections = 100`: **8 × 10 = 80 fits; 12 × 10 = 120 does not** — at that
+point the per-instance pool shrinks (per-instance demand falls as N grows, so the
+formula self-corrects) or PgBouncer enters. Pool sizing is env-configurable and
+ordering-validated for exactly this moment ([ADR 0009](docs/ADR/0009-connection-and-query-bounds.md)).
+
+### 3. Degradation
+
+Bounds exist so no single request can hold the system hostage: pool acquire **2 s**,
+statement ceiling **5 s** (bounds advisory-lock convoys — measured firing inside the
+lock function), idle-in-transaction kill **10 s**, all ordering-enforced at boot,
+all returning **503 + `Retry-After: 5`** instead of joining an invisible queue
+([ADR 0009](docs/ADR/0009-connection-and-query-bounds.md)). The point worth stating
+plainly: the load measurement's "zero errors at every level" was **not a good
+sign** — with no acquire timeout, an exhausted pool made requests wait forever, and
+a probe proved it (silent indefinite wait unbounded; clean rejection at 1.5 s
+bounded). The old behaviour was an unbounded queue wearing a flattering costume;
+the bounds convert it into visible, sheddable, retryable load. Retrying is safe by
+construction: `ON CONFLICT` absorbs duplicate entries, and a timed-out location
+report self-heals on the user's next ping.
+
+### The optimisation record — measured, including the losers
+
+Nothing here was added because it sounded fast. What was tried:
+
+- **GIST index on the polygon column** — measured (index-rewritten containment
+  plan), kept. [ADR 0003](docs/ADR/0003-spatial-query-strategy.md)
+- **`(recorded_at DESC, id DESC)` index for the log walk** — added on evidence: the
+  unfiltered page was a 41 ms seq scan at 200k rows, 0.34 ms after.
+  [ADR 0006](docs/ADR/0006-read-endpoint-pagination.md)
+- **`folded` PL/pgSQL lock-and-read** — 4 round trips instead of 5, **+15–20%
+  throughput** over the two-step baseline in both workloads at every concurrency
+  level (1,605 vs 1,393 req/s static at c=500), raced against two alternatives.
+  [ADR 0007](docs/ADR/0007-presence-read-strategy.md)
+- **Redis presence cache** — built, measured, **removed**: +7% on a static workload
+  at 99.7% hit rate, −13 to −18% *below baseline* under transitions as invalidation
+  churn collapsed the hit rate to 0.50–0.78; review also found a correctness hole.
+  The bottleneck was never the database read. [ADR 0007](docs/ADR/0007-presence-read-strategy.md)
+- **Queue for log writes** — rejected on arithmetic: ~8 persistent inserts/s
+  average, ~170/s worst peak; both trivial for Postgres.
+  [ADR 0004](docs/ADR/0004-no-queue.md)
+- **Pool enlargement** — rejected on measurement: demand ≈ 6.4 of 10 connections,
+  mostly idle-in-transaction; more connections change nothing while Node is the
+  wall. [ADR 0009](docs/ADR/0009-connection-and-query-bounds.md)
+
+### Two optimisations deliberately not implemented
+
+Decisions with revisit conditions, not a to-do list:
+
+- **Collapsing the request into one round trip.** The spatial query, lock, set
+  difference and writes could live in a single PL/pgSQL function — 4 round trips to
+  1, and it would also shed Node-side work, which is where the bottleneck actually
+  is. Not done: it moves the entire transition model into SQL, where it is harder
+  to test and read than the current TypeScript; the gain is unmeasured; and
+  horizontal scaling delivers a larger improvement for less risk. Revisit when a
+  measurement shows per-request round trips dominating *after* the Node ceiling has
+  been lifted by scaling out.
+- **Polygon caching.** If any cache is ever warranted, the polygons are the right
+  target — near-static, small, identical for every user, read outside any lock —
+  and [ADR 0003](docs/ADR/0003-spatial-query-strategy.md) keeps application-layer
+  point-in-polygon open "until the per-request round trip is a measured
+  bottleneck". Not done now: with Node as the wall, removing a database round trip
+  runs into the same ~1,600 req/s ceiling, and multi-instance invalidation needs a
+  broadcast component. The cheap experiment that settles it: stub the spatial query
+  with a fixed result and re-run `scripts/measure-presence.mjs` — if throughput
+  moves from ~1,600 toward ~3,000 it's worth building; if it barely moves, it's
+  noise.
 
 ## Stack
 

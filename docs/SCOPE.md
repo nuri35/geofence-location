@@ -115,6 +115,21 @@ Not scope decisions but facts surfaced by the ADR 0007 measurement
   a whole is a non-goal (above); recorded so the token-bucket work covers it
   when it comes.
 
+## Deferred optimisations — decided against for now, with revisit conditions
+
+Two real optimisations, recorded as decisions rather than a to-do list (full
+reasoning in the README's load section and ADR 0003):
+
+- **One-round-trip request** (whole transition path in PL/pgSQL): unmeasured
+  gain, moves the tested TypeScript transition model into SQL, and horizontal
+  scaling buys more for less risk. Revisit when round trips measurably dominate
+  *after* scaling out lifts the Node ceiling.
+- **In-process polygon cache**: the right cache target if any (near-static,
+  shared, read outside the lock — everything presence was not), but it removes a
+  database round trip while Node is the wall, and multi-instance invalidation
+  needs a broadcast component. Revisit via the stub experiment in ADR 0003's
+  second annotation.
+
 ## Antimeridian and pole-crossing polygons
 
 `geometry` with SRID 4326 does planar math in degrees: a polygon spanning the

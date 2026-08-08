@@ -112,3 +112,9 @@ It stays unimplemented, deliberately:
 The revisit condition above stands unchanged — when the per-request round trip
 is a *measured* bottleneck — now with the added knowledge of **which** cache to
 build when that day comes, and what it costs.
+
+> Second annotation (2026-08-08): the cheap experiment that settles the revisit
+> question without building anything — stub `findCoveringAreaIds` with a fixed
+> result and re-run `scripts/measure-presence.mjs`. Throughput moving from
+> ~1,600 toward ~3,000 req/s means the spatial round trip is worth removing;
+> barely moving means it is noise under the Node ceiling.
