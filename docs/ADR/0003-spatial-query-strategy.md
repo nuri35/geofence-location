@@ -118,3 +118,30 @@ build when that day comes, and what it costs.
 > result and re-run `scripts/measure-presence.mjs`. Throughput moving from
 > ~1,600 toward ~3,000 req/s means the spatial round trip is worth removing;
 > barely moving means it is noise under the Node ceiling.
+
+> **Third annotation (2026-08-08) — the experiment above was run. The
+> pre-registered criterion fired: the spatial round trip is worth removing.**
+> Conditions: same harness, same box, same-session control (essential — machine
+> state had drifted ~+20% since the original measurement, control that day:
+> static c=500 1,986 req/s vs 1,605 originally). Stub: coordinate-aware fixed
+> result (inside → the real area id, outside → `[]`, id cached at first call) so
+> both workloads kept their true downstream work. Results, control → stub:
+> static c=50/200/500: 1,970→2,905, 1,887→2,731, **1,986→2,835 (+43%)**;
+> transition c=500: 1,506→2,258 (+50%). In the cost model's own units the
+> removed round trip priced at **~0.16 ms of event-loop budget vs the ~0.12 ms
+> a generic round trip predicts** — the model holds directionally and slightly
+> understates this particular round trip, most plausibly because the spatial
+> statement is the heaviest of the four (largest SQL text, unprepared,
+> parameter-built geometry), not because round trips generally cost more. The
+> discriminator, if it ever matters: replace the spatial query with `SELECT 1`
+> — round trip kept, execution removed — and see which side of ~2,000 lands.
+> Implications for the deferred candidates: an in-process polygon cache's upper
+> bound is now measured (+40–50% single-box) and its risk profile is unchanged
+> (low), so it moves **ahead of** the full one-round-trip fold in
+> value-per-risk; the fold's ~2× projection is credible at the low end
+> (~1.7×, since BEGIN/COMMIT are cheaper round trips than the spatial one) but
+> its cost — the transition model in PL/pgSQL — is unchanged. Neither is built;
+> the multi-instance invalidation question stands. Prediction record: the
+> stated band (1,750–1,900) was beaten because it was anchored to the stale
+> baseline; against the same-session control the gain matched the model's
+> direction and exceeded its point estimate by ~35%.
