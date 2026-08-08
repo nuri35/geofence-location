@@ -79,8 +79,11 @@ from main.ts in Phase 2A so e2e harnesses get the exact production pipe) and run
 with `whitelist: true`, `forbidNonWhitelisted: true`, `transform: true`. Consequences for every DTO you
 write: a request field without a decorated DTO property is a **400, not silently
 stripped**; DTO instances are real class instances (`transform`), so
-`@Type(() => Number)` etc. work. `src/common/dto/` is the home for shared DTOs
-(currently empty by design).
+`@Type(() => Number)` etc. work. `src/common/dto/` holds the shared documentation
+DTOs: `ResponseEnvelopeDto` and `ErrorResponseDto` — used by the
+`ApiEnvelopedResponse` decorator (src/common/decorators/) so /docs shows the
+envelope the wire actually carries; the schema is pinned by
+test/openapi.e2e-spec.ts.
 
 ## Path aliases
 

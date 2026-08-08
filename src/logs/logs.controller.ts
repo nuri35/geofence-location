@@ -1,5 +1,8 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { ApiBadRequestResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBadRequestResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+
+import { ApiEnvelopedResponse } from '@app/common/decorators';
+import { ErrorResponseDto } from '@app/common/dto';
 
 import { ListLogsQueryDto, LogsPageResponseDto } from './dto';
 import { LogsService } from './logs.service';
@@ -17,8 +20,13 @@ export class LogsController {
       're-sent with every request — the cursor encodes position only. Walk pages via nextCursor; ' +
       'null nextCursor means the last page.',
   })
-  @ApiOkResponse({ type: LogsPageResponseDto })
-  @ApiBadRequestResponse({ description: 'Malformed cursor, invalid filter, or limit out of range' })
+  @ApiEnvelopedResponse(LogsPageResponseDto, {
+    description: 'A page of log rows plus nextCursor, wrapped in the response envelope',
+  })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Malformed cursor, invalid filter, or limit out of range',
+  })
   list(@Query() query: ListLogsQueryDto): Promise<LogsPageResponseDto> {
     return this.logsService.list(query);
   }
