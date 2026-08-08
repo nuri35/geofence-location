@@ -243,10 +243,21 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
         FOR EACH ROW EXECUTE FUNCTION fail_txn_proof();
     `);
     try {
-      await request(app.getHttpServer())
+      const response = await request(app.getHttpServer())
         .post('/locations')
         .send({ userId: 'u-txn-proof', lng: 2, lat: 2 })
         .expect(500);
+
+      // A real driver-level failure must produce the house error shape with a generic
+      // message — nothing from the database error may leak to the client.
+      expect(response.body).toMatchObject({
+        statusCode: 500,
+        path: '/locations',
+        message: 'Internal server error',
+      });
+      expect(typeof (response.body as { timestamp: string }).timestamp).toBe('string');
+      expect(JSON.stringify(response.body)).not.toContain('forced failure');
+      expect(JSON.stringify(response.body)).not.toContain('trg_fail');
 
       expect(await presenceFor('u-txn-proof')).toHaveLength(0);
       expect(await logsFor('u-txn-proof')).toHaveLength(0);

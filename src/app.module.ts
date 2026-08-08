@@ -4,7 +4,7 @@ import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AreasModule } from '@app/areas/areas.module';
-import { HttpExceptionFilter } from '@app/common/filters';
+import { AllExceptionsFilter } from '@app/common/filters';
 import { ResponseTransformInterceptor } from '@app/common/interceptors';
 import { HealthModule } from '@app/health/health.module';
 import { LocationsModule } from '@app/locations/locations.module';
@@ -36,7 +36,7 @@ import { typeOrmModuleFactory } from '@config/typeorm.config';
   providers: [
     {
       provide: APP_FILTER,
-      useClass: HttpExceptionFilter,
+      useClass: AllExceptionsFilter,
     },
     {
       provide: APP_INTERCEPTOR,

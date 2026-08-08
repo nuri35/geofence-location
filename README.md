@@ -120,6 +120,24 @@ The API listens on `http://localhost:3000`. Health: `GET /health`. Swagger UI: `
 | `GET /areas` | List areas with full GeoJSON geometry, `limit`/`offset` |
 | `GET /logs` | Entry log, newest first, keyset-paginated over `(recorded_at, id)` via an opaque cursor (`nextCursor`, null at the end); optional combinable filters `userId`, `areaId`, `from`/`to` on `recorded_at`; page size 50, max 500 |
 
+## Error contract
+
+Every error this API produces has one shape:
+
+```json
+{ "statusCode": 400, "timestamp": "2026-08-08T05:45:44.714Z", "path": "/locations", "message": "..." }
+```
+
+`message` is a string, or an array of strings for validation failures. This holds for
+validation errors, unknown routes (404), malformed JSON bodies, oversized bodies
+(413), and internal failures — where `message` is always the generic
+`"Internal server error"`: nothing from the underlying exception (driver messages,
+SQL fragments, connection details) ever reaches a client; the full detail goes to the
+server log instead. One deliberate exception: `GET /health` returns Terminus's own
+structured body in **both** directions — 200 healthy and 503 unhealthy — so the
+per-dependency detail (`database: down`) survives exactly when an operator needs it.
+The contract is pinned by `test/errors.e2e-spec.ts`.
+
 ## Scripts
 
 | Script                   | Purpose                                             |

@@ -59,10 +59,18 @@ src/app.module.ts and wraps every controller response as
   same decorator, never a path check inside the interceptor.
 - `/docs` — Swagger is served by middleware, so interceptors never applied to it.
 
-`HttpExceptionFilter` (global via `APP_FILTER`) shapes error responses as
-`{ statusCode, timestamp, path, message }`. It catches `HttpException` only —
-non-HTTP throws fall through to Nest's default 500 handler. `message` passes
-through class-validator's `string[]` untouched.
+`AllExceptionsFilter` (global via `APP_FILTER`, `@Catch()` catch-all — replaced
+the old HttpException-only filter in Phase 4B after the smoke test caught two
+inconsistent failure shapes) shapes every error as
+`{ statusCode, timestamp, path, message }`. Its branches: (1) an `HttpException`
+carrying a structured object payload **without** a `message` key passes through
+verbatim — that keeps Terminus's per-indicator detail in unhealthy `/health`
+503s; (2) other `HttpException`s get the house shape, `message` passing
+class-validator's `string[]` untouched; (3) exposed 4xx middleware errors
+(http-errors convention, e.g. body-parser's 413) get the house shape with their
+own message; (4) anything else is internal — client sees the generic
+`"Internal server error"`, the log gets message + stack. Never let a raw driver
+message reach a response. Contract pinned by test/errors.e2e-spec.ts.
 
 ## DTO validation
 
