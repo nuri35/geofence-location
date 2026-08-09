@@ -145,7 +145,9 @@ describe('Worker loop (e2e, N4C — ADR 0016)', () => {
     } else {
       process.env.AREAS_POLL_INTERVAL_MS = savedPollInterval;
     }
-  });
+    // 30s: closing a worker context + app + purging queues legitimately exceeds
+    // jest's default 5s HOOK timeout under load — observed as a teardown-only flake.
+  }, 30_000);
 
   it('closes the loop: POST 202 → partition → worker → log row, timestamped with receivedAt', async () => {
     const areaId = await createArea('worker-loop-area', 174);

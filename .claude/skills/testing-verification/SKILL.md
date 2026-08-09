@@ -48,7 +48,8 @@ Jest 29 + ts-jest, Supertest 7. Two suites with different trust models.
   150..170, spatial-equivalence.e2e-spec 59..81, area-snapshot.e2e-spec
   105..115, presence-cache.e2e-spec 120..130, stale-presence.e2e-spec 131..134,
   redis-down.e2e-spec 135..145, bounds.e2e-spec 46..48, worker-loop.e2e-spec
-  174..176 — a new spec takes an unclaimed range and records it here.
+  174..176, worker-resilience.e2e-spec 177..179 — a new spec takes an
+  unclaimed range and records it here.
 - **The e2e suite runs serially (`maxWorkers: 1` in jest-e2e.json) since Phase
   N3.** Two interference classes forced it: spec files sharing a worker leak
   `process.env` mutations into the next file's app boot (specs that override

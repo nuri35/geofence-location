@@ -96,17 +96,30 @@ describe('Locations publishing (e2e, N4B — ADR 0015)', () => {
   beforeAll(async () => {
     // This spec asserts messages REMAIN in the partitions. Any attached consumer
     // (a worker process, a lingering worker-loop context, an IDE-launched run)
-    // would eat them and turn every assertion into a mystery — fail fast instead.
-    for (let i = 0; i < PARTITIONS; i += 1) {
-      const queue = (await mgmt('GET', `/queues/%2F/loc.events.p${i}`)) as {
-        consumers?: number;
-      };
-      if ((queue.consumers ?? 0) > 0) {
-        throw new Error(
-          `loc.events.p${i} has ${queue.consumers} consumer(s) attached — a worker is running; ` +
-            'stop it before this spec (it asserts message presence)',
-        );
+    // would eat them and turn every assertion into a mystery. A consumer from the
+    // PREVIOUS spec can linger a few seconds in the management stats after its
+    // close — wait it out, and only then fail with a named cause.
+    const consumerTotal = async (): Promise<number> => {
+      let total = 0;
+      for (let i = 0; i < PARTITIONS; i += 1) {
+        const queue = (await mgmt('GET', `/queues/%2F/loc.events.p${i}`)) as {
+          consumers?: number;
+        };
+        total += queue.consumers ?? 0;
       }
+      return total;
+    };
+    const deadline = Date.now() + 10_000;
+    let lingering = await consumerTotal();
+    while (lingering > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      lingering = await consumerTotal();
+    }
+    if (lingering > 0) {
+      throw new Error(
+        `${lingering} consumer(s) still attached to the partitions after 10s — a worker is ` +
+          'running; stop it before this spec (it asserts message presence)',
+      );
     }
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -116,12 +129,14 @@ describe('Locations publishing (e2e, N4B — ADR 0015)', () => {
     app = moduleFixture.createNestApplication();
     await app.init();
     await purgePartitions();
-  });
+    // 30s: the consumer-drain wait above can legitimately use 10s, which is past
+    // jest's DEFAULT 5s hook timeout — the exact way this hook failed once.
+  }, 30_000);
 
   afterAll(async () => {
     await purgePartitions();
     await app.close();
-  });
+  }, 30_000);
 
   it('a valid request returns 202 with an eventId and no transition fields', async () => {
     const response = await post({ userId: 'n4b-u1', lng: 41, lat: 41 }).expect(202);
