@@ -1,5 +1,16 @@
 # geofence-location
 
+![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![PostGIS](https://img.shields.io/badge/PostGIS-3.4-4169E1)
+![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
+![RabbitMQ](https://img.shields.io/badge/RabbitMQ-target%20(N4)-FF6600?logo=rabbitmq&logoColor=white)
+![TypeORM](https://img.shields.io/badge/TypeORM-0.3-FE0803)
+![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-161%20passing%20(88%20unit%20%2B%2073%20e2e)-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
 A geofencing API built on NestJS + PostgreSQL/PostGIS. Users report coordinates
 (`POST /locations`); when a user **enters** a predefined geographic area, exactly one
 event is logged with user, area, and timestamp — under high concurrent load, without
