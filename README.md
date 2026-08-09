@@ -355,6 +355,13 @@ npm run start:dev           # the API (validate → publish → 202)
 npm run start:worker        # the worker (consume → transition → log) — build first: npm run build
 ```
 
+> **The supervisor is you.** The worker deliberately exits(1) when its broker
+> connection drops (ADR 0016) and assumes something restarts it. Nothing in this
+> repo is that something — there is no container, no systemd unit, no pm2
+> config. In development that supervisor is a human rerunning `start:worker`;
+> a real deployment must supply one, and that gap is recorded as packaging debt
+> in ADR 0018.
+
 The API listens on `http://localhost:3000`. Health: `GET /health`. Swagger UI: `/docs`.
 
 ## Endpoints

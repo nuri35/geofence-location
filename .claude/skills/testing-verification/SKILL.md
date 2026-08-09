@@ -127,6 +127,41 @@ Related port trap: this machine also runs a native PostgreSQL on 5432, so `.env`
 here uses `POSTGRES_PORT=5433`. A DB auth failure with correct credentials means
 you may be talking to the wrong server entirely.
 
+## Measurement discipline (learned at N2/N3, binding for N6+)
+
+- **Single-window comparisons on this machine lie — always bracket ABBA.**
+  Within one session, identical code drifted ±15–20% between runs (N2: control
+  static c=10 fell 2,353 → 2,000 across a session; N3 confirmed). Run
+  control–candidate–candidate–control in ONE session and compare adjacent
+  pairs; a lone A-then-B comparison has already produced a phantom regression
+  here (N2's "transition −17%" reproduced in the control itself). Never compare
+  across sessions or days.
+- **A second test runner may be live on this box.** IDE- or agent-launched
+  suites have twice interfered with measurements and e2e runs (eaten queue
+  messages; a mid-edit lint revert). Before measuring: check queue consumer
+  counts are what you expect and `Get-CimInstance Win32_Process` for stray
+  node/jest processes. The consumer-attachment guards in the e2e specs exist
+  because of this.
+- **The choreography, in order** (the harness enforces the starred ones):
+  1. `docker compose ps -a` — three containers healthy, mq-topology Exited (0).
+  2. `npm run build` — the measured artifacts are dist/, not src/.
+  3. Seed `load-area` and bump `area_version` BEFORE booting the measured
+     server and worker — their boot snapshots must contain it (*enforced:
+     the harness refuses if the area is missing).
+  4. Verify port 3000's owner, boot `node dist/main` and `node dist/worker-main`,
+     confirm the worker log line `consuming N partition(s)`.
+  5. (*enforced) partitions are purged before each workload and the post-warm
+     backlog is drained before measurement starts.
+  6. FLUSHDB before candidate runs if the parked path's cache participates.
+  7. Between ABBA arms: stop both processes, swap dist, reboot both — never
+     measure a server whose dist predates the checkout.
+- **Queue numbers come from AMQP passive checkQueue, not the management API**
+  (mgmt stats lag 5–7 s — measured, ADR 0014). The harness already does this;
+  keep it that way in any new instrument.
+- **What the harness cannot see** is stated in scripts/measure-presence.mjs's
+  header (fast-path latency, worker internals, observer costs) — read it before
+  quoting any number it prints.
+
 ## Never trust wall-clock through `docker exec`
 
 `docker exec` costs **3.5–8 s of startup** on this machine, and it inverted an
