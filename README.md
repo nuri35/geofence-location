@@ -160,6 +160,23 @@ Decisions with revisit conditions, not a to-do list:
   moves from ~1,600 toward ~3,000 it's worth building; if it barely moves, it's
   noise.
 
+## The adaptive client contract (design assumption, ADR 0010)
+
+The scaling story assumes clients send **adaptively, not on a timer**: a location
+event is worth sending when **(1)** at least ~10 seconds have passed since the last
+send, **(2)** the device has moved at least ~50 metres, and **(3)** the GPS fix is
+accurate enough to trust. This matters because event volume then scales with
+*movement*, not with population × clock — a fixed-interval client multiplies load
+without adding information, and the downstream design (dedup, and the queue-based
+architecture this contract prepares for) is sized around the adaptive assumption.
+
+The logic lives on the device; the server records the assumption and defends
+against bad input: readings with `accuracy` > 100 m are rejected with **422** (an
+error radius that large cannot answer "inside or outside" near any boundary), and
+retried events are absorbed by per-device deduplication (`deviceId` + `seq`, where
+`seq` detects repeats — it is **not** an ordering guarantee). Clients that predate
+the contract send neither field and are processed without deduplication.
+
 ## Stack
 
 | Component  | Choice                                          |
@@ -195,7 +212,7 @@ The API listens on `http://localhost:3000`. Health: `GET /health`. Swagger UI: `
 
 | Endpoint | Behaviour |
 | --- | --- |
-| `POST /locations` | Report a position; returns 201 `{ enteredAreaIds: [...] }` — the entries this request produced, `[]` when nothing changed |
+| `POST /locations` | Report a position; returns 201 `{ enteredAreaIds: [...], duplicate: false }` — the entries this request produced. Optional `deviceId`+`seq` enable per-device dedup (repeats → 200, `duplicate: true`); `accuracy` > 100 m → 422; `capturedAt` stored, informational (ADR 0010) |
 | `POST /areas` | Create an area from a GeoJSON Polygon (`[lng, lat]` order; ≤1000 vertices; `ST_IsValid`-gated with the reason in the 400) |
 | `GET /areas` | List areas with full GeoJSON geometry, `limit`/`offset` |
 | `GET /logs` | Entry log, newest first, keyset-paginated over `(recorded_at, id)` via an opaque cursor (`nextCursor`, null at the end); optional combinable filters `userId`, `areaId`, `from`/`to` on `recorded_at`; page size 50, max 500 |

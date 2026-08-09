@@ -12,7 +12,7 @@ const row = (n: number): Record<string, unknown> => ({
   area_id: '11111111-1111-1111-1111-111111111111',
   recorded_at: new Date(1754580000000 + n),
   cursor_ts: `2026-08-07 17:00:00.00${n}+00`,
-  observed_at: null,
+  captured_at: null,
 });
 
 describe('LogsService', () => {

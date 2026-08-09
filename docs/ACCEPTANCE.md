@@ -16,7 +16,7 @@ observable state throughout; scenario 13 asserts the response body itself.
 | # | Proven by |
 | --- | --- |
 | 1–8 | `test/locations.e2e-spec.ts` — test names carry the scenario number verbatim (e.g. "4. logs a second entry after exit and re-entry"; 8 is the 20-way concurrent race) |
-| 9 | `test/locations.e2e-spec.ts` — "9. persists observedAt verbatim without letting it affect the outcome" |
+| 9 | `test/locations.e2e-spec.ts` — "9. persists capturedAt verbatim without letting it affect the outcome" (includes the deprecated observedAt alias) |
 | 10 | Retired (see the scenario) — was verified while the cache existed: container stopped, 24 tests green, recorded in the Phase 3 trail; the cache and its spec were removed by ADR 0007 |
 | 11 | `test/areas.e2e-spec.ts` — "11. rejects a self-intersecting bowtie…" + "11. rejects an unclosed ring…" (test titles carry the scenario number) |
 | 12 | `test/locations.e2e-spec.ts` — "12. rejects out-of-range coordinates and oversized userId with 400"; `test/areas.e2e-spec.ts` — "12. rejects out-of-range coordinates with 400" |
@@ -82,15 +82,18 @@ mid-transaction failure rolls back the presence write).
 - **Expected**: both requests complete without error; exactly one log row
   (U, A); exactly one presence row (U, A).
 
-## 9. persists observed_at without letting it affect the outcome
+## 9. persists capturedAt without letting it affect the outcome
+
+*(Field renamed from `observedAt` by ADR 0010 — same semantic; the deprecated
+`observedAt` request alias must persist identically.)*
 
 - **Setup**: area A. U outside A.
-- **Sequence**: `POST /locations` for U inside A carrying an `observed_at` far
+- **Sequence**: `POST /locations` for U inside A carrying a `capturedAt` far
   in the past; later, the same sequence for a second user V without any
-  `observed_at`.
+  `capturedAt`.
 - **Expected**: identical transition outcomes for U and V — one entry log each,
-  one presence row each (ADR 0005: `observed_at` participates in no logic).
-  U's log row carries the supplied `observed_at` verbatim; V's carries null.
+  one presence row each (ADR 0005: `capturedAt` participates in no logic).
+  U's log row carries the supplied `capturedAt` verbatim; V's carries null.
   Both rows' `recorded_at` are server-assigned.
 
 ## 10. preserves all transition semantics with Redis unavailable — RETIRED

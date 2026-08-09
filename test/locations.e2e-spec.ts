@@ -14,13 +14,14 @@ interface Envelope<T> {
 
 interface ReportResponse {
   enteredAreaIds: string[];
+  duplicate: boolean;
 }
 
 interface LogRow {
   user_id: string;
   area_id: string;
   recorded_at: string;
-  observed_at: string | null;
+  captured_at: string | null;
 }
 
 const square = (lngBase: number, latBase: number, size: number): object => ({
@@ -55,18 +56,18 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
     userId: string,
     lng: number,
     lat: number,
-    observedAt?: string,
+    capturedAt?: string,
   ): Promise<ReportResponse> => {
     const response = await request(app.getHttpServer())
       .post('/locations')
-      .send({ userId, lng, lat, ...(observedAt === undefined ? {} : { observedAt }) })
+      .send({ userId, lng, lat, ...(capturedAt === undefined ? {} : { capturedAt }) })
       .expect(201);
     return (response.body as Envelope<ReportResponse>).data;
   };
 
   const logsFor = (userId: string): Promise<LogRow[]> =>
     dataSource.query<LogRow[]>(
-      'SELECT user_id, area_id, recorded_at, observed_at FROM logs WHERE user_id = $1 ORDER BY recorded_at, area_id',
+      'SELECT user_id, area_id, recorded_at, captured_at FROM logs WHERE user_id = $1 ORDER BY recorded_at, area_id',
       [userId],
     );
 
@@ -169,20 +170,105 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
     expect(await presenceFor('u-race')).toEqual([{ area_id: areaA }]);
   });
 
-  it('9. persists observedAt verbatim without letting it affect the outcome', async () => {
+  it('9. persists capturedAt verbatim without letting it affect the outcome', async () => {
     const withClaim = await report('u-observed', 2, 2, '1999-12-31T23:59:59.000Z');
     const control = await report('u-control', 2, 2);
     expect(withClaim.enteredAreaIds).toEqual([areaA]);
     expect(control.enteredAreaIds).toEqual([areaA]);
 
-    const observedLogs = await logsFor('u-observed');
-    expect(observedLogs).toHaveLength(1);
-    expect(new Date(observedLogs[0].observed_at ?? '').toISOString()).toBe(
+    const capturedLogs = await logsFor('u-observed');
+    expect(capturedLogs).toHaveLength(1);
+    expect(new Date(capturedLogs[0].captured_at ?? '').toISOString()).toBe(
       '1999-12-31T23:59:59.000Z',
     );
     const controlLogs = await logsFor('u-control');
     expect(controlLogs).toHaveLength(1);
-    expect(controlLogs[0].observed_at).toBeNull();
+    expect(controlLogs[0].captured_at).toBeNull();
+
+    // Deprecated alias (ADR 0010): pre-contract clients sending observedAt still persist.
+    await request(app.getHttpServer())
+      .post('/locations')
+      .send({ userId: 'u-alias', lng: 2, lat: 2, observedAt: '2001-01-01T00:00:00.000Z' })
+      .expect(201);
+    const aliasLogs = await logsFor('u-alias');
+    expect(new Date(aliasLogs[0].captured_at ?? '').toISOString()).toBe('2001-01-01T00:00:00.000Z');
+  });
+
+  describe('ADR 0010 payload contract', () => {
+    it('acknowledges a repeated seq as a 200 duplicate without reprocessing', async () => {
+      const first = await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-dedup', deviceId: 'phone-1', seq: 1, lng: 2, lat: 2 })
+        .expect(201);
+      expect((first.body as Envelope<ReportResponse>).data).toMatchObject({
+        enteredAreaIds: [areaA],
+        duplicate: false,
+      });
+
+      const repeat = await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-dedup', deviceId: 'phone-1', seq: 1, lng: 2, lat: 2 })
+        .expect(200);
+      expect((repeat.body as Envelope<ReportResponse>).data).toMatchObject({
+        enteredAreaIds: [],
+        duplicate: true,
+      });
+      expect(await logsFor('u-dedup')).toHaveLength(1);
+    });
+
+    it('processes a newer seq normally', async () => {
+      await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-dedup2', deviceId: 'phone-1', seq: 1, lng: 2, lat: 2 })
+        .expect(201);
+      const newer = await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-dedup2', deviceId: 'phone-1', seq: 2, lng: 50, lat: 50 })
+        .expect(201);
+      expect((newer.body as Envelope<ReportResponse>).data.duplicate).toBe(false);
+      expect(await presenceFor('u-dedup2')).toHaveLength(0); // the exit was processed
+    });
+
+    it('treats the same seq from a different device independently', async () => {
+      await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-multi', deviceId: 'phone-1', seq: 7, lng: 50, lat: 50 })
+        .expect(201);
+      const otherDevice = await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-multi', deviceId: 'watch-2', seq: 7, lng: 2, lat: 2 })
+        .expect(201);
+      expect((otherDevice.body as Envelope<ReportResponse>).data).toMatchObject({
+        enteredAreaIds: [areaA],
+        duplicate: false,
+      });
+    });
+
+    it('rejects unusable GPS accuracy with 422 in the house error shape', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-acc', lng: 2, lat: 2, accuracy: 150 })
+        .expect(422);
+      expect(response.body).toMatchObject({ statusCode: 422, path: '/locations' });
+      expect(JSON.stringify(response.body)).toContain('accuracy 150m exceeds');
+      expect(await logsFor('u-acc')).toHaveLength(0);
+
+      await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-acc', lng: 2, lat: 2, accuracy: 12.5 })
+        .expect(201);
+    });
+
+    it('rejects deviceId without seq (and vice versa) with 400', async () => {
+      await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-pair', deviceId: 'phone-1', lng: 2, lat: 2 })
+        .expect(400);
+      await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-pair', seq: 3, lng: 2, lat: 2 })
+        .expect(400);
+    });
   });
 
   it('13. returns 201 naming exactly the areas entered, then an empty array', async () => {

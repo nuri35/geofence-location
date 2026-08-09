@@ -14,6 +14,8 @@ import { CreateLogsTable1786110074569 } from '../src/migrations/1786110074569-Cr
 import { CreatePresenceTable1786110075607 } from '../src/migrations/1786110075607-CreatePresenceTable';
 import { CreateLockedPresenceReadFunction1786118827443 } from '../src/migrations/1786118827443-CreateLockedPresenceReadFunction';
 import { CreateLogsRecordedIdIndex1786128051611 } from '../src/migrations/1786128051611-CreateLogsRecordedIdIndex';
+import { CreateUserEventState1786247465996 } from '../src/migrations/1786247465996-CreateUserEventState';
+import { RenameLogsObservedAtToCapturedAt1786247467078 } from '../src/migrations/1786247467078-RenameLogsObservedAtToCapturedAt';
 import { E2E_DATABASE_NAME } from './e2e-constants';
 
 // Migrations are imported explicitly (no glob: transform contexts resolve globs
@@ -29,6 +31,8 @@ const MIGRATIONS = [
   CreatePresenceTable1786110075607,
   CreateLockedPresenceReadFunction1786118827443,
   CreateLogsRecordedIdIndex1786128051611,
+  CreateUserEventState1786247465996,
+  RenameLogsObservedAtToCapturedAt1786247467078,
 ];
 
 const provisionE2eDatabase = async (): Promise<void> => {

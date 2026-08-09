@@ -17,7 +17,7 @@ interface LogItem {
   userId: string;
   areaId: string;
   recordedAt: string;
-  observedAt: string | null;
+  capturedAt: string | null;
 }
 
 interface LogsPage {
@@ -59,11 +59,11 @@ describe('Logs (e2e) — keyset pagination invariants', () => {
     userId: string,
     areaId: string,
     recordedAt: string,
-    observedAt: string | null = null,
+    capturedAt: string | null = null,
   ): Promise<unknown> =>
     dataSource.query(
-      'INSERT INTO logs (user_id, area_id, recorded_at, observed_at) VALUES ($1, $2, $3::timestamptz, $4)',
-      [userId, areaId, recordedAt, observedAt],
+      'INSERT INTO logs (user_id, area_id, recorded_at, captured_at) VALUES ($1, $2, $3::timestamptz, $4)',
+      [userId, areaId, recordedAt, capturedAt],
     );
 
   beforeAll(async () => {
@@ -196,9 +196,9 @@ describe('Logs (e2e) — keyset pagination invariants', () => {
     await request(app.getHttpServer()).get('/logs?limit=0').expect(400);
   });
 
-  it('observedAt is returned verbatim where present, null elsewhere', async () => {
+  it('capturedAt is returned verbatim where present, null elsewhere', async () => {
     const withClaim = await getPage('?userId=lg-2&limit=10');
-    const claimed = withClaim.items.find((item) => item.observedAt !== null);
-    expect(claimed?.observedAt).toBe('2026-08-07T10:19:00.000Z');
+    const claimed = withClaim.items.find((item) => item.capturedAt !== null);
+    expect(claimed?.capturedAt).toBe('2026-08-07T10:19:00.000Z');
   });
 });

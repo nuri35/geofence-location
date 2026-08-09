@@ -66,6 +66,9 @@ Numbered, append-only. One or two sentences here; the reasoning lives in the ADR
 14. `user_id` is `varchar(64)` — free-form, since auth is a non-goal (identity is a claim, not a verified fact), but bounded so the column and the advisory-lock hash have a defined input.
 15. The presence read is `folded` — lock+read in one round trip via the `lock_user_and_read_presence` plpgsql function, the only implementation. Decided by measurement (+15–20% over a two-step baseline in both workloads at every concurrency level, while a Redis cache lost to baseline under transitions); the losing paths and their strategy flag were then removed — the decision stays reversible through the ADR, the measurement doc, and git history, not through dormant code. — [ADR 0007](docs/ADR/0007-presence-read-strategy.md)
 16. Connection and query bounds are deliberate and ordering-enforced at boot: pool acquire 2 s < statement ceiling 5 s < idle-in-transaction kill 10 s, pool size 10 per instance (explicit, env-configurable). Timeout classes return 503 with `Retry-After: 5`, never 500; the migration CLI carries no bounds. — [ADR 0009](docs/ADR/0009-connection-and-query-bounds.md)
+17. GPS readings with `accuracy` above 100 m are rejected with **422** (well-formed, semantically unusable — distinct from the pipe's 400s): an error radius that large cannot answer "inside or outside" near any boundary. Absent accuracy is trusted (legacy clients). — [ADR 0010](docs/ADR/0010-adaptive-payload-contract.md)
+18. Deduplication is per **(userId, deviceId)** via a monotonic `seq`, checked inside the write transaction under the advisory lock, on every request including no-ops; duplicates return 200 with `duplicate: true`, not an error. **`seq` is for dedup only — never an ordering guarantee**; ordering remains server arrival (decision 8). — [ADR 0010](docs/ADR/0010-adaptive-payload-contract.md)
+19. `capturedAt` replaces `observedAt` (same semantic: device-side reading time, informational only); `observedAt` survives as a deprecated request alias, and `deviceId`/`seq` absent means legacy processing without dedup — the contract change is graceful, not breaking. — [ADR 0010](docs/ADR/0010-adaptive-payload-contract.md)
 
 ## Hard constraints
 
@@ -95,6 +98,15 @@ The single source of truth for progress — phase documents carry no status fiel
 | 3 | Redis read-through cache in front of presence + Redis health indicator. Explicitly cuttable — the architecture is correct without it | Complete, then reversed on evidence: cache built and measured (ADR 0007), rejected, and removed along with the Redis infrastructure |
 | 4 | `GET /logs` keyset pagination + its indexes, pool sizing, `statement_timeout`, load measurement with real numbers | Complete — 4A: strategy measurement + `GET /logs`; 4B: error contract (ADR 0008-adjacent fixes), connection/query bounds (ADR 0009). Full backpressure (HTTP admission control) deliberately not built — acquire timeout is its down payment |
 | 5 | README, Swagger, full green chain, manual audit of every acceptance scenario, clean-clone verification | Complete — all 14 scenarios manually audited against the prod artifact (zero contradictions), final clean clone from remote green end-to-end, Swagger reviewed (consumer gaps recorded in the phase 5 report), docs aligned |
+
+New-architecture phases (adaptive clients → partitioned queue → in-memory-polygon workers):
+
+| Phase | Scope | Status |
+| --- | --- | --- |
+| N1 | Adaptive payload contract: `deviceId`/`seq` dedup, `capturedAt`, `accuracy` gate — system stays synchronous | Complete — [ADR 0010](docs/ADR/0010-adaptive-payload-contract.md) |
+| N2 | In-memory polygon cache (measured upper bound +43–50%, ADR 0003 annotations) | Not started |
+| N3 | — | Not started |
+| N4 | Partitioned queue; workers absorb the transition path; dedup state leaves the hot path | Not started |
 
 ## Session protocol
 

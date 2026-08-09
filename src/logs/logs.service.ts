@@ -13,7 +13,7 @@ interface LogRow {
   recorded_at: Date;
   /** recorded_at as Postgres text — full microsecond precision for the cursor. */
   cursor_ts: string;
-  observed_at: Date | null;
+  captured_at: Date | null;
 }
 
 @Injectable()
@@ -52,7 +52,7 @@ export class LogsService {
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const rows = await this.dataSource.query<LogRow[]>(
-      `SELECT "id", "user_id", "area_id", "recorded_at", "recorded_at"::text AS "cursor_ts", "observed_at"
+      `SELECT "id", "user_id", "area_id", "recorded_at", "recorded_at"::text AS "cursor_ts", "captured_at"
        FROM "${LOGS_TABLE}"
        ${where}
        ORDER BY "recorded_at" DESC, "id" DESC
@@ -70,7 +70,7 @@ export class LogsService {
         userId: row.user_id,
         areaId: row.area_id,
         recordedAt: row.recorded_at.toISOString(),
-        observedAt: row.observed_at === null ? null : row.observed_at.toISOString(),
+        capturedAt: row.captured_at === null ? null : row.captured_at.toISOString(),
       })),
       nextCursor: hasMore
         ? encodeLogsCursor({ recordedAt: lastRow.cursor_ts, id: lastRow.id })

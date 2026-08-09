@@ -33,7 +33,7 @@ export class LogEntity {
   @CreateDateColumn({ type: 'timestamptz', name: 'recorded_at' })
   recordedAt!: Date;
 
-  /** Client's claim; informational only, used by no logic anywhere (ADR 0005). */
-  @Column({ type: 'timestamptz', name: 'observed_at', nullable: true })
-  observedAt!: Date | null;
+  /** Device-side reading time; informational only, used by no logic anywhere (ADR 0005, renamed by ADR 0010). */
+  @Column({ type: 'timestamptz', name: 'captured_at', nullable: true })
+  capturedAt!: Date | null;
 }

@@ -15,10 +15,11 @@ export class LogItemDto {
 
   @ApiProperty({
     nullable: true,
-    description: 'Client-reported claim; informational only',
+    description:
+      'Device-side reading time (renamed from observedAt by ADR 0010); informational only',
     type: String,
   })
-  observedAt!: string | null;
+  capturedAt!: string | null;
 }
 
 export class LogsPageResponseDto {
