@@ -36,6 +36,7 @@ export enum EnvKey {
   RabbitMqUser = 'RABBITMQ_USER',
   RabbitMqPassword = 'RABBITMQ_PASSWORD',
   WorkerPartitions = 'WORKER_PARTITIONS',
+  WorkerPrefetch = 'WORKER_PREFETCH',
 }
 
 /**

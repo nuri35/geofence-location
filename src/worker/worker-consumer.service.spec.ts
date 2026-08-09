@@ -107,6 +107,137 @@ describe('WorkerConsumerService', () => {
     });
   });
 
+  describe('per-user chains (N5A, ADR 0017)', () => {
+    const forUser = (userId: string, eventId: string): amqp.ConsumeMessage =>
+      makeMessage({ ...baseEvent, userId, eventId });
+
+    it('same user is strictly sequential; different users run concurrently', async () => {
+      const started: string[] = [];
+      const resolvers = new Map<string, () => void>();
+      report.mockImplementation((dto: { userId: string }) => {
+        started.push(dto.userId);
+        return new Promise<{ enteredAreaIds: string[]; duplicate: boolean }>((resolve) => {
+          resolvers.set(dto.userId, () => resolve({ enteredAreaIds: [], duplicate: false }));
+        });
+      });
+
+      const slow1 = handle(channel, 'loc.events.p0', forUser('ahmet', 'a-1'));
+      const slow2 = handle(channel, 'loc.events.p0', forUser('ahmet', 'a-2'));
+      const other = handle(channel, 'loc.events.p0', forUser('ayse', 'b-1'));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // ayse started WHILE ahmet's first message is still in flight — concurrency.
+      // ahmet's second message has NOT started — same-user ordering.
+      expect(started).toEqual(['ahmet', 'ayse']);
+
+      resolvers.get('ayse')?.();
+      await other;
+      expect(started).toEqual(['ahmet', 'ayse']); // still only one ahmet start
+
+      resolvers.get('ahmet')?.();
+      await slow1;
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(started).toEqual(['ahmet', 'ayse', 'ahmet']); // a-2 only after a-1 completed
+      resolvers.get('ahmet')?.();
+      await slow2;
+    });
+
+    it('each task acks its OWN delivery tag at its OWN completion', async () => {
+      const first = forUser('u1', 'e-1');
+      const second = forUser('u2', 'e-2');
+      const resolvers: Array<() => void> = [];
+      report.mockImplementation(
+        () =>
+          new Promise<{ enteredAreaIds: string[]; duplicate: boolean }>((resolve) => {
+            resolvers.push(() => resolve({ enteredAreaIds: [], duplicate: false }));
+          }),
+      );
+
+      const p1 = handle(channel, 'loc.events.p0', first);
+      const p2 = handle(channel, 'loc.events.p0', second);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(channel.ack).not.toHaveBeenCalled(); // nothing acked before completion
+
+      resolvers[1]?.(); // u2 finishes FIRST
+      await p2;
+      expect(channel.ack).toHaveBeenCalledTimes(1);
+      expect(channel.ack).toHaveBeenNthCalledWith(1, second); // its own message, not u1's
+
+      resolvers[0]?.();
+      await p1;
+      expect(channel.ack).toHaveBeenNthCalledWith(2, first);
+    });
+
+    it('a drained chain is removed; a chain re-created concurrently survives the old cleanup', async () => {
+      await handle(channel, 'loc.events.p0', forUser('u-clean', 'e-1'));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(service.activeChainCount).toBe(0); // drained -> removed
+      channel.ack.mockClear(); // count the race part on its own
+
+      // Race shape: enqueue a second message the moment the first's tail settles.
+      const resolvers: Array<() => void> = [];
+      report.mockImplementation(
+        () =>
+          new Promise<{ enteredAreaIds: string[]; duplicate: boolean }>((resolve) => {
+            resolvers.push(() => resolve({ enteredAreaIds: [], duplicate: false }));
+          }),
+      );
+      const p1 = handle(channel, 'loc.events.p0', forUser('u-race', 'e-1'));
+      await new Promise((resolve) => setImmediate(resolve)); // task started, resolver registered
+      resolvers[0]?.(); // e-1 settles -> its cleanup microtask is now pending
+      const p2 = handle(channel, 'loc.events.p0', forUser('u-race', 'e-2')); // lands in the cleanup window
+      await new Promise((resolve) => setImmediate(resolve));
+      resolvers[1]?.();
+      await Promise.all([p1, p2]);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(service.activeChainCount).toBe(0); // both processed, nothing leaked
+      expect(channel.ack).toHaveBeenCalledTimes(2); // e-2 was NOT lost to the cleanup race
+    });
+
+    it('shutdown cancels consumers FIRST, then drains in-flight work, then closes', async () => {
+      // Inject the live handles bootstrap would have created (bootstrap itself
+      // needs a real broker and is covered by the worker-loop e2e).
+      const cancel = jest.fn().mockResolvedValue(undefined);
+      const close = jest.fn().mockResolvedValue(undefined);
+      const connectionClose = jest.fn().mockResolvedValue(undefined);
+      const bootChannel = { cancel, close, ack: jest.fn(), nack: jest.fn() };
+      const internals = service as unknown as {
+        channel: unknown;
+        connection: unknown;
+        consumerTags: string[];
+      };
+      internals.channel = bootChannel;
+      internals.connection = { close: connectionClose };
+      internals.consumerTags.push('tag-0');
+
+      let finish!: () => void;
+      report.mockImplementation(
+        (): Promise<{ enteredAreaIds: string[]; duplicate: boolean }> =>
+          new Promise((resolve) => {
+            finish = (): void => resolve({ enteredAreaIds: [], duplicate: false });
+          }),
+      );
+      const inFlight = handle(bootChannel, 'loc.events.p0', forUser('u-drain', 'e-1'));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      let shutdownDone = false;
+      const shutdown = service.onApplicationShutdown().then(() => {
+        shutdownDone = true;
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(cancel).toHaveBeenCalledWith('tag-0'); // deliveries stopped first
+      expect(shutdownDone).toBe(false); // still waiting on the in-flight chain
+      expect(close).not.toHaveBeenCalled(); // channel stays open for the pending ack
+
+      finish();
+      await inFlight;
+      await shutdown;
+      expect(shutdownDone).toBe(true);
+      expect(bootChannel.ack).toHaveBeenCalledTimes(1); // the in-flight work acked before close
+      expect(close).toHaveBeenCalled();
+    });
+  });
+
   describe('failure routing', () => {
     it('acks and counts a stale-area FK violation — the ONE narrow exception', async () => {
       report.mockRejectedValue(

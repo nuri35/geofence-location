@@ -17,7 +17,7 @@ import { LOCATION_EVENT_SCHEMA_VERSION } from '@app/mq/mq.constants';
 import { mqConfig } from '@config/mq.config';
 import { workerConfig } from '@config/worker.config';
 
-import { PARTITION_QUEUE_PREFIX, WORKER_PREFETCH } from './worker.constants';
+import { PARTITION_QUEUE_PREFIX } from './worker.constants';
 
 interface LastSeqRow {
   last_seq: string;
@@ -36,9 +36,15 @@ const PG_FOREIGN_KEY_VIOLATION = '23503';
  * ACK discipline: ack only after the transaction committed (report() resolves
  * post-commit); the no-change fast path opens no transaction and acks directly.
  * A worker dying mid-transition rolls back and the message is redelivered clean.
- * Prefetch is 1 per consumer — RECORDED AS TEMPORARY: higher prefetch would let
- * two messages for one user process concurrently and break per-user ordering;
- * the per-user parallelism that makes it safe is N5's work.
+ *
+ * EXECUTION MODEL (N5A, ADR 0017): per-user promise chains. Each message is
+ * appended to its user's chain — same user strictly sequential (ordering), and
+ * DIFFERENT users concurrent, which removes the head-of-line blocking prefetch 1
+ * imposed. Every task acks/nacks its OWN delivery at its OWN completion; a
+ * drained chain is removed from the map (identity-checked, so a chain created
+ * concurrently for the same user is never deleted by the old chain's cleanup).
+ * Prefetch is configuration (WORKER_PREFETCH): it no longer guards ordering,
+ * only the in-flight budget per partition and the crash-redelivery burst.
  */
 @Injectable()
 export class WorkerConsumerService implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -46,6 +52,14 @@ export class WorkerConsumerService implements OnApplicationBootstrap, OnApplicat
   private connection: amqp.ChannelModel | null = null;
   private channel: amqp.Channel | null = null;
   private closing = false;
+  private readonly consumerTags: string[] = [];
+
+  /**
+   * userId -> tail of that user's processing chain (N5A). Entries are removed
+   * when the chain drains; the removal compares identity so it can never delete
+   * a NEWER chain created for the same user while cleanup was pending.
+   */
+  private readonly userChains = new Map<string, Promise<void>>();
 
   /**
    * Lazy in-memory dedup (ADR 0016): `userId:deviceId` -> highest seq PROCESSED.
@@ -77,9 +91,9 @@ export class WorkerConsumerService implements OnApplicationBootstrap, OnApplicat
       password: this.mq.password,
     });
     const channel = await connection.createChannel();
-    // Per-consumer limit (global=false): one unacked message per partition queue —
-    // serial within a partition (ordering), parallel across partitions.
-    await channel.prefetch(WORKER_PREFETCH, false);
+    // Per-consumer limit (global=false): the in-flight budget per partition.
+    // Ordering no longer depends on this — the per-user chains own it (ADR 0017).
+    await channel.prefetch(this.worker.prefetch, false);
 
     // Passive verification only — the topology belongs to N4A's declarator job.
     // A missing partition queue aborts boot loudly instead of silently declaring.
@@ -104,19 +118,34 @@ export class WorkerConsumerService implements OnApplicationBootstrap, OnApplicat
 
     for (const partition of this.worker.partitions) {
       const queue = `${PARTITION_QUEUE_PREFIX}${partition}`;
-      await channel.consume(queue, (message) => {
+      const consumer = await channel.consume(queue, (message) => {
         if (message !== null) {
           void this.handle(channel, queue, message);
         }
       });
+      this.consumerTags.push(consumer.consumerTag);
     }
     this.logger.log(
-      `consuming ${this.worker.partitions.length} partition(s): ${this.worker.partitions.join(', ')} (prefetch ${WORKER_PREFETCH})`,
+      `consuming ${this.worker.partitions.length} partition(s): ${this.worker.partitions.join(', ')} (prefetch ${this.worker.prefetch}, per-user chains)`,
     );
   }
 
+  /**
+   * Graceful shutdown (ADR 0017): stop deliveries FIRST (cancel every consumer),
+   * then drain the in-flight chains — each task still acks/nacks on the open
+   * channel — and only then close. Closing under in-flight work would strand
+   * half-processed messages in the redelivery path for no reason.
+   */
   async onApplicationShutdown(): Promise<void> {
     this.closing = true;
+    try {
+      for (const tag of this.consumerTags) {
+        await this.channel?.cancel(tag);
+      }
+    } catch {
+      // Channel already dead: deliveries have stopped by definition.
+    }
+    await Promise.allSettled([...this.userChains.values()]);
     try {
       await this.channel?.close();
       await this.connection?.close();
@@ -125,7 +154,16 @@ export class WorkerConsumerService implements OnApplicationBootstrap, OnApplicat
     }
   }
 
-  private async handle(
+  /** Observable for tests and ops: number of users with a live processing chain. */
+  get activeChainCount(): number {
+    return this.userChains.size;
+  }
+
+  /**
+   * Parse, then append to the user's chain. Returns the completion of THIS
+   * message's processing (tests await it; production fire-and-forgets).
+   */
+  private handle(
     channel: amqp.Channel,
     queue: string,
     message: amqp.ConsumeMessage,
@@ -141,9 +179,47 @@ export class WorkerConsumerService implements OnApplicationBootstrap, OnApplicat
       // policy bounds redeliveries and dead-letters it for inspection.
       this.logger.warn(`${queue}: malformed message: ${String(error)}`);
       channel.nack(message, false, true);
-      return;
+      return Promise.resolve();
     }
 
+    return this.enqueue(event.userId, () => this.processEvent(channel, queue, message, event));
+  }
+
+  /**
+   * The N5A chain append. Same user: strictly after the previous message —
+   * ordering. Different users: independent chains — concurrency. The tail is
+   * error-proofed (processEvent never throws, but a defect there must not
+   * poison the user's next message), and cleanup deletes the map entry only if
+   * it still IS this tail — the race where a new message arrives just as the
+   * chain drains resolves in the new chain's favor.
+   */
+  private enqueue(userId: string, task: () => Promise<void>): Promise<void> {
+    const previous = this.userChains.get(userId) ?? Promise.resolve();
+    const tail = previous.then(task).catch((error: unknown) => {
+      this.logger.error(
+        `chain task for ${userId} escaped its own error handling: ${String(error)}`,
+      );
+    });
+    this.userChains.set(userId, tail);
+    void tail.then(() => {
+      if (this.userChains.get(userId) === tail) {
+        this.userChains.delete(userId);
+      }
+    });
+    return tail;
+  }
+
+  /**
+   * Processes ONE message and settles ITS delivery: each task acks/nacks its own
+   * delivery tag at its own completion — with many in flight, no task ever
+   * touches another's tag, which is what keeps ack-after-commit true per message.
+   */
+  private async processEvent(
+    channel: amqp.Channel,
+    queue: string,
+    message: amqp.ConsumeMessage,
+    event: LocationEventV1,
+  ): Promise<void> {
     try {
       // Dedup gate — read-only against the table, then memory (ADR 0016).
       if (await this.isDuplicate(event)) {

@@ -57,6 +57,7 @@ export const envValidationSchema = Joi.object({
   [EnvKey.WorkerPartitions]: Joi.string()
     .pattern(/^\d+(-\d+)?(,\s*\d+(-\d+)?)*$/)
     .default('0-7'),
+  [EnvKey.WorkerPrefetch]: Joi.number().integer().min(1).max(1000).default(16),
 }).custom((env: Record<string, unknown>) => {
   // ADR 0009: acquire < statement < idle-in-transaction. Waiting longer for a
   // connection than the bound on what holds connections just grows the queue, and a

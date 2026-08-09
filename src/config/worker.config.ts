@@ -5,6 +5,12 @@ import { ConfigNamespace, EnvKey } from './config.constants';
 export interface WorkerConfig {
   /** Partition indices this worker owns — static external assignment (ADR 0016). */
   partitions: number[];
+  /**
+   * Per-consumer prefetch (ADR 0017). Per-user ordering no longer depends on it —
+   * the per-user promise chains do that — so it is purely a throughput/exposure
+   * knob: in-flight budget per partition, and the redelivery burst after a crash.
+   */
+  prefetch: number;
 }
 
 /**
@@ -35,4 +41,5 @@ export const workerConfig = registerAs(ConfigNamespace.Worker, (): WorkerConfig 
   // Dev default covers all 8 dev partitions with one worker; production sets
   // explicit slices of the 256 (e.g. "0-63" across four workers).
   partitions: parsePartitionSpec(process.env[EnvKey.WorkerPartitions] ?? '0-7'),
+  prefetch: parseInt(process.env[EnvKey.WorkerPrefetch] ?? '16', 10),
 }));
