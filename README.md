@@ -5,10 +5,10 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![PostGIS](https://img.shields.io/badge/PostGIS-3.4-4169E1)
 ![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
-![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.13%20(topology%2C%20N4A)-FF6600?logo=rabbitmq&logoColor=white)
+![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.13-FF6600?logo=rabbitmq&logoColor=white)
 ![TypeORM](https://img.shields.io/badge/TypeORM-0.3-FE0803)
 ![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-161%20passing%20(88%20unit%20%2B%2073%20e2e)-brightgreen)
+![Tests](https://img.shields.io/badge/tests-116%20unit%20%2B%20e2e-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 A geofencing system built on NestJS + RabbitMQ + PostgreSQL/PostGIS + Redis.
@@ -22,13 +22,21 @@ accepted events). The last measured load numbers — and what the async pipeline
 still owes measurement — are in
 [one place below](#under-load--concurrency-capacity-degradation).
 
+If you came expecting four endpoints and are looking at a queue and workers:
+the case's load requirement is why. A synchronous version answered the brief
+first (phases 0–5, measured); [ADR 0011](docs/ADR/0011-partitioned-async-architecture.md)
+then rebuilt ingestion around a partitioned queue so bursts are absorbed
+rather than shed — a decision with its own record, not accretion.
+
 Decisions and project state live in [CLAUDE.md](CLAUDE.md); reasoning lives in
 [docs/ADR/](docs/ADR/README.md); working conventions live in [.claude/](.claude/README.md).
 
 ## The architecture — as built
 
 > **This is the system that runs** (ADR 0011, built through N5B across ADRs
-> 0012–0018; the N6 load measurement is the remaining item). Readers of the old
+> 0012–0018; N6's first load measurement is in —
+> [docs/ASYNC_LOAD_MEASUREMENT.md](docs/ASYNC_LOAD_MEASUREMENT.md) — with
+> off-box worker scaling the open remainder). Readers of the old
 > "target" diagram will recognise the shape — what changed is inside the worker
 > box and the arrows to the stores: presence is worker memory backed by
 > Postgres (never Redis on a cold read), dedup is worker memory over a
@@ -87,7 +95,8 @@ Decisions and project state live in [CLAUDE.md](CLAUDE.md); reasoning lives in
 **Why this shape.** Each layer scales with a different thing: the API with
 instances (it holds no state and touches no database), the queue with its fixed
 partition count (256 partitions serve a million users — same user, same lane),
-workers with load (ownership rebalances; a slow user delays only their own
+workers with load (ownership is static today — `WORKER_PARTITIONS` — with
+rebalancing designed but not built; a slow user delays only their own
 lane), and Postgres with **membership changes only** — the ~1% of events on the
 right branch of the fork. That fork is the design: the shared resource every
 per-ping round trip used to consume (Postgres connections, PostGIS execution)
@@ -182,12 +191,16 @@ large number of concurrent requests." That sentence contains two different probl
 being *correct* when requests race, and having *capacity* when they pile up — plus a
 third the requirement implies: degrading in a bounded way when capacity runs out.
 This section answers all three, with numbers, **for the pre-queue synchronous
-system** — the last load measurement taken (Phase N3). Since N4 the request path
-is asynchronous and **unmeasured**: these figures are the baseline the async
-pipeline must beat when N6 runs the harness against it, not a description of
-what currently runs. The correctness results transfer (the same transaction,
-lock, and arbiter now execute in the worker); the throughput numbers do not,
-in either direction, until measured. Every number
+system** (Phase N3) — kept as the baseline the async pipeline was measured
+against. **The async pipeline has now had its first measurement** (N6,
+2026-08-09, ABBA-bracketed on one box): API ingest ceilings at **4.6–5.0k
+req/s** (the fast path leaves Postgres idle), end-to-end 202→log-visible runs
+**p50 ≤ 30 ms / p99 ≤ 130 ms** healthy and ~4 s under a stall-induced 13.7k
+backlog that the queue absorbed with zero API errors — conditions, verdicts on
+the ADR claims, and instrument caveats in
+[docs/ASYNC_LOAD_MEASUREMENT.md](docs/ASYNC_LOAD_MEASUREMENT.md); off-box
+worker scaling is the open remainder. The correctness results below transfer
+(the same transaction, lock, and arbiter now execute in the worker). Every number
 below was measured on one development box (Windows/WSL2 Docker, generator + app +
 Postgres co-located, same-host database, warm connection pool) via closed-loop load
 against the real production artifact — 10,000 distinct users, four concurrency
@@ -416,7 +429,7 @@ chosen to land your retry after the stall that caused it.
 | `npm run migration:generate` | `-- src/migrations/<Name>` to diff entities     |
 | `npm run migration:run`  | Apply pending migrations                            |
 | `npm run migration:revert` | Roll back the last migration                      |
-| `node scripts/measure-presence.mjs` | ADR 0007 load-measurement harness (see docs/PRESENCE_READ_MEASUREMENT.md) |
+| `node scripts/measure-presence.mjs` | Load harness, rewritten for the async pipeline (filename is historical): ingest throughput, queue depth/drain, tracer e2e latency — see docs/ASYNC_LOAD_MEASUREMENT.md; the synchronous-era record is docs/PRESENCE_READ_MEASUREMENT.md |
 
 ## Project structure
 
@@ -426,12 +439,15 @@ src/
 ├── main.ts                  # bootstrap: helmet, compression, Swagger
 ├── config/                  # ONLY place that reads process.env (namespaced, Joi-validated)
 ├── common/                  # global filter, response envelope interceptor, decorators
-├── areas/                   # POST/GET /areas, GeoJSON validation, ST_Covers containment query
-├── locations/               # POST /locations — the transition path (ADR 0002)
+├── areas/                   # POST/GET /areas, GeoJSON validation, in-memory spatial snapshot (ADR 0012)
+├── locations/               # POST /locations publishes since N4B (ADR 0015); the transition service is parked here and mounted by the worker
 ├── logs/                    # entry events: LogEntity + GET /logs (keyset pagination, ADR 0006)
-├── presence/                # PresenceEntity — the source-of-truth membership table
+├── presence/                # source-of-truth membership table, worker presence memory (ADR 0018), cache + metrics for the parked path
+├── mq/                      # publisher with confirms (ADR 0015); topology is never declared here (ADR 0014)
+├── worker/                  # partition consumer: per-user chains, ack-after-commit, in-memory dedup (ADR 0016/0017)
+├── redis/                   # Redis client module (parked-path cache + post-commit DELs)
 ├── health/                  # GET /health (Terminus, db ping)
-└── migrations/              # extension → areas → logs → presence → lock/read function
+└── migrations/              # extension → areas → logs → presence → lock function → dedup state → area_version
 test/                        # e2e specs + per-run provisioning of the geofence_test database
 scripts/                     # measurement harness (measure-presence.mjs)
 docs/                        # ADRs, SCOPE, ACCEPTANCE, measurement records
@@ -456,6 +472,13 @@ Required variables have no fallback — the app refuses to start if one is missi
 | `POSTGRES_STATEMENT_TIMEOUT_MS` | no | `5000`  | Server-side statement ceiling; must be < idle-txn timeout (ADR 0009) |
 | `POSTGRES_IDLE_TXN_TIMEOUT_MS` | no | `10000`  | Kills transactions left idle by a hung app side (ADR 0009) |
 | `AREAS_POLL_INTERVAL_MS` | no | `30000`  | How often each instance polls `area_version` for polygon changes made by other instances; the creating instance refreshes immediately (ADR 0012) |
+| `RABBITMQ_HOST`     | yes      | —             | Broker host — the API refuses to boot without a confirmed exchange (ADR 0015) |
+| `RABBITMQ_PORT`     | yes      | —             | Broker AMQP port                             |
+| `RABBITMQ_USER`     | yes      | —             | Broker user                                  |
+| `RABBITMQ_PASSWORD` | yes      | —             | Broker password                              |
+| `MQ_PARTITION_COUNT` | no      | `8`           | Partition count declared by the compose topology job (8 dev / 256 prod); effectively immutable once declared — ADR 0014 |
+| `WORKER_PARTITIONS` | no       | `0-7`         | Partition indices this worker owns — static assignment, e.g. `0-63` (ADR 0016) |
+| `WORKER_PREFETCH`   | no       | `16`          | Per-consumer in-flight budget; not an ordering guard since N5A (ADR 0017) |
 | `REDIS_HOST`        | yes      | —             | Redis host (presence cache — ADR 0013). Correctness survives the server being DOWN; the coordinates are still never guessed |
 | `REDIS_PORT`        | yes      | —             | Redis port (also used by compose mapping) |
 | `REDIS_PASSWORD`    | no       | *(empty)*     | Redis AUTH password; empty = no auth (compose default) |

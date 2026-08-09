@@ -1,0 +1,113 @@
+{
+  "info": {
+    "name": "geofence-location demo",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Kordon demo: seven-step transition sequence plus the guards. Base URL http://localhost:3000."
+  },
+  "item": [
+    {
+      "name": "Setup - POST /areas (kordon)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "http://localhost:3000/areas", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["areas"] },
+        "body": { "mode": "raw", "options": { "raw": { "language": "json" } }, "raw": "{\n  \"name\": \"kordon\",\n  \"boundary\": { \"type\": \"Polygon\", \"coordinates\": [[[27.13,38.41],[27.15,38.41],[27.15,38.43],[27.13,38.43],[27.13,38.41]]] }\n}" }
+      }
+    },
+    {
+      "name": "GET /areas",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "http://localhost:3000/areas", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["areas"] }
+      }
+    },
+    {
+      "name": "Step 1 - outside (no log)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "http://localhost:3000/locations", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["locations"] },
+        "body": { "mode": "raw", "options": { "raw": { "language": "json" } }, "raw": "{\n  \"userId\": \"demo-user\",\n  \"deviceId\": \"postman-1\",\n  \"seq\": 1,\n  \"lat\": 38.45,\n  \"lng\": 27.14,\n  \"accuracy\": 10\n}" }
+      }
+    },
+    {
+      "name": "Step 2 - inside (one log, one presence row)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "http://localhost:3000/locations", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["locations"] },
+        "body": { "mode": "raw", "options": { "raw": { "language": "json" } }, "raw": "{\n  \"userId\": \"demo-user\",\n  \"deviceId\": \"postman-1\",\n  \"seq\": 2,\n  \"lat\": 38.42,\n  \"lng\": 27.14,\n  \"accuracy\": 10\n}" }
+      }
+    },
+    {
+      "name": "Step 3 - same spot again (still one log)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "http://localhost:3000/locations", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["locations"] },
+        "body": { "mode": "raw", "options": { "raw": { "language": "json" } }, "raw": "{\n  \"userId\": \"demo-user\",\n  \"deviceId\": \"postman-1\",\n  \"seq\": 3,\n  \"lat\": 38.42,\n  \"lng\": 27.14,\n  \"accuracy\": 10\n}" }
+      }
+    },
+    {
+      "name": "Step 4 - same spot again (still one log)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "http://localhost:3000/locations", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["locations"] },
+        "body": { "mode": "raw", "options": { "raw": { "language": "json" } }, "raw": "{\n  \"userId\": \"demo-user\",\n  \"deviceId\": \"postman-1\",\n  \"seq\": 4,\n  \"lat\": 38.42,\n  \"lng\": 27.14,\n  \"accuracy\": 10\n}" }
+      }
+    },
+    {
+      "name": "Step 5 - outside (presence gone, still one log)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "http://localhost:3000/locations", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["locations"] },
+        "body": { "mode": "raw", "options": { "raw": { "language": "json" } }, "raw": "{\n  \"userId\": \"demo-user\",\n  \"deviceId\": \"postman-1\",\n  \"seq\": 5,\n  \"lat\": 38.45,\n  \"lng\": 27.14,\n  \"accuracy\": 10\n}" }
+      }
+    },
+    {
+      "name": "Step 6 - inside again (second log)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "http://localhost:3000/locations", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["locations"] },
+        "body": { "mode": "raw", "options": { "raw": { "language": "json" } }, "raw": "{\n  \"userId\": \"demo-user\",\n  \"deviceId\": \"postman-1\",\n  \"seq\": 6,\n  \"lat\": 38.42,\n  \"lng\": 27.14,\n  \"accuracy\": 10\n}" }
+      }
+    },
+    {
+      "name": "Step 7 - replay seq 6 (dropped as duplicate)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "http://localhost:3000/locations", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["locations"] },
+        "body": { "mode": "raw", "options": { "raw": { "language": "json" } }, "raw": "{\n  \"userId\": \"demo-user\",\n  \"deviceId\": \"postman-1\",\n  \"seq\": 6,\n  \"lat\": 38.42,\n  \"lng\": 27.14,\n  \"accuracy\": 10\n}" }
+      }
+    },
+    {
+      "name": "Guard - accuracy 150m rejected 422",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "http://localhost:3000/locations", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["locations"] },
+        "body": { "mode": "raw", "options": { "raw": { "language": "json" } }, "raw": "{\n  \"userId\": \"demo-user\",\n  \"deviceId\": \"postman-1\",\n  \"seq\": 99,\n  \"lat\": 38.42,\n  \"lng\": 27.14,\n  \"accuracy\": 150\n}" }
+      }
+    },
+    {
+      "name": "Guard - self-intersecting polygon rejected 400",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "http://localhost:3000/areas", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["areas"] },
+        "body": { "mode": "raw", "options": { "raw": { "language": "json" } }, "raw": "{\n  \"name\": \"bowtie\",\n  \"boundary\": { \"type\": \"Polygon\", \"coordinates\": [[[27.13,38.41],[27.15,38.43],[27.15,38.41],[27.13,38.43],[27.13,38.41]]] }\n}" }
+      }
+    },
+    {
+      "name": "GET /logs (demo-user)",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "http://localhost:3000/logs?userId=demo-user", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["logs"], "query": [{ "key": "userId", "value": "demo-user" }] }
+      }
+    }
+  ]
+}
