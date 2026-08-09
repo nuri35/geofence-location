@@ -107,6 +107,14 @@ demand it below a few hundred thousand users per worker (same threshold ADR
 - **Rebalancing itself**: ownership is static; handoff, fencing, and memory/
   dedup invalidation on partition movement are designed (hooks exist) but not
   built or proven.
+- **Observability of the memory itself**: `PresenceMemoryService.size` and the
+  dedup Map are process-internal fields. `/health` and `/metrics` are served by
+  the API process and cannot see them, and the worker exposes no HTTP surface
+  at all — so memory size, seed rate, and staleness are invisible to the
+  supervisor ADR 0016 tells to restart the process. Known limitation, not an
+  oversight: tests and N6's harness read the fields in-process; a real
+  deployment needs a worker-side metrics surface before this state matters
+  operationally.
 - **Checkpointing**: `user_event_state` writes as rebalance checkpoints
   (ADR 0016's promise) — not built; a crash still re-reads presence lazily and
   re-drops duplicates via ON CONFLICT, which is correct but unmeasured at scale.

@@ -174,6 +174,17 @@ deliberately not an observability stack):
   bound on suppressed entries per window — not a count of them**: read-aside
   races and ordinary stale-"changed" hits produce the same signature.
 
+> Scope annotation (2026-08-09, N5B — [ADR 0018](0018-worker-local-presence.md)):
+> these counters now answer a narrower question than the one they were built
+> for. The worker never reads Redis, so the stale-cache mechanism whose
+> signature they trace exists only on the parked API-side path — and
+> `GET /metrics` is served by the API process alone, so that path is the only
+> surface they observe. The worker process still increments them (its hygiene
+> DEL can fail; its memory/Postgres hint can open a no-op transaction), but
+> those increments are invisible — the worker has no metrics surface (the gap
+> ADR 0018 records). Read them as parked-path instrumentation, not system-wide
+> staleness telemetry.
+
 **Rejected directions, recorded because each will be asked again:**
 
 - **Fencing / version tokens: rejected permanently.** In the dangerous case the
