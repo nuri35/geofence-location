@@ -145,3 +145,16 @@ build when that day comes, and what it costs.
 > stated band (1,750–1,900) was beaten because it was anchored to the stale
 > baseline; against the same-session control the gain matched the model's
 > direction and exceeded its point estimate by ~35%.
+
+> **Fourth annotation (2026-08-09) — the revisit condition has fired and the
+> answer is scheduled.** This ADR kept application-layer point-in-polygon open
+> "until the per-request round trip is a measured bottleneck"; the stub
+> measurement above is that condition firing. Under the target architecture
+> ([ADR 0011](0011-partitioned-async-architecture.md)) workers hold the
+> polygons in memory as a versioned snapshot and do point-in-polygon there —
+> PostGIS leaves the per-ping hot path entirely while keeping everything this
+> ADR actually decided: it remains the source of truth for area definitions,
+> the `ST_IsValid` validator on `POST /areas`, and the `ST_Covers` boundary
+> semantics that the in-memory implementation must reproduce. Invalidation is
+> version-bump + publish, with periodic version polling as the self-healing
+> path. Nothing here is contradicted; the "until" clause resolved.

@@ -1,7 +1,19 @@
 # ADR 0004 — No message queue on the write path
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR 0011](0011-partitioned-async-architecture.md) (2026-08-09 — scope change, not correction)
 - **Date**: 2026-08-07
+
+> **Supersession note.** This ADR's arithmetic and measurements stand — they
+> answered the question they were asked, at the scale that was measured. What
+> reopened the queue is an honest accounting of what the arithmetic covered:
+> it priced **durable log writes** (~8/s), which are rare, while **ingestion**
+> scales with location events, which are not. At the target scale (millions of
+> events/day, many app instances against one Postgres), every per-ping round
+> trip becomes a shared-resource cost that horizontal scaling multiplies rather
+> than relieves. The revisit condition written below ("the day the write path
+> gains a slow side effect… reopens") was the wrong trigger; the real trigger
+> was the target scale moving. Everything below is preserved as the record of
+> the decision at its original scope.
 
 ## Context
 

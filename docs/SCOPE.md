@@ -94,11 +94,13 @@ is multiplied load share, pool pressure, and an open abuse surface — though no
 log corruption, since extra inside-samples cause no transitions. Load
 measurement added a data point: `/health` costs a real DB ping per call and
 plateaus at ~1k req/s on the reference box — an unauthenticated amplification
-target that a token bucket should also cover. The fix is a per-user bucket
-(`@nestjs/throttler` — its distributed store would mean re-introducing Redis,
-which was removed with the presence cache in ADR 0007 — or a gateway-level
-limit). Deferred with the rest of the abuse surface, behind the missing
-authentication.
+target that a token bucket should also cover. The fix is a per-user bucket at
+the stateless API of the target architecture (its natural home once ADR 0011's
+Redis returns to the stack, or at the gateway). Still deferred with the rest of
+the abuse surface, behind the missing authentication — but note the async
+design *raises* the stakes: an abusive client fills queue partitions instead of
+merely burning CPU, so N4 should not ship without at least a per-user publish
+budget.
 
 ## Observations from load testing — known and unaddressed
 
@@ -117,20 +119,39 @@ Not scope decisions but facts surfaced by the ADR 0007 measurement
   a whole is a non-goal (above); recorded so the token-bucket work covers it
   when it comes.
 
+## Assumptions depended on, not implemented
+
+- **Client-side adaptive sending** (ADR 0010/0011): the scaling story assumes
+  devices send on ≥10 s elapsed AND ≥50 m moved AND usable accuracy. That logic
+  lives on the device and is *not implemented here* — the server records the
+  assumption (README) and defends the edges it can see (accuracy gate, dedup).
+  A fixed-timer client silently multiplies event volume without adding
+  information; nothing server-side can fully compensate.
+
 ## Deferred optimisations — decided against for now, with revisit conditions
 
-Two real optimisations, recorded as decisions rather than a to-do list (full
-reasoning in the README's load section and ADR 0003):
+Status after ADR 0011 (the target architecture) reshuffled this list:
 
-- **One-round-trip request** (whole transition path in PL/pgSQL): unmeasured
-  gain, moves the tested TypeScript transition model into SQL, and horizontal
-  scaling buys more for less risk. Revisit when round trips measurably dominate
-  *after* scaling out lifts the Node ceiling.
-- **In-process polygon cache**: the right cache target if any (near-static,
-  shared, read outside the lock — everything presence was not), but it removes a
-  database round trip while Node is the wall, and multi-instance invalidation
-  needs a broadcast component. Revisit via the stub experiment in ADR 0003's
-  second annotation.
+- **In-process polygon cache** — *no longer deferred*: promoted to phase N2 as
+  the in-memory versioned polygon snapshot, after the stub measurement fired
+  its pre-registered revisit condition (ADR 0003, annotations 2–4).
+- **One-round-trip request** (whole transition path in PL/pgSQL) — *dissolved
+  rather than deferred*: the worker model of ADR 0011 removes the per-ping
+  round trips wholesale, which is what this fold was for. No revisit condition
+  remains; git history keeps the analysis.
+- **Worker-local presence state** — deferred out of the target's first version:
+  fastest and most fragile (restart loses it; a partition rebalance can leave
+  two workers with different pictures of one user). Reopens when rebalance
+  fencing exists and the Redis hop on the 99% path is a measured cost.
+- **Business-event publication** (ENTER/EXIT as consumable events for other
+  systems): deferred until a second consumer exists — publishing to nobody is
+  surface without a customer.
+- **Geohash-based fast paths** (pre-filtering candidate areas by cell):
+  deferred until the in-memory polygon set is measurably too large for brute
+  R-tree/linear checks — at current area counts it is noise.
+- **Kafka migration**: the initial broker choice serves 256 partitions fine;
+  reopens if partition count, retention, or consumer-group semantics outgrow
+  it. A broker swap behind the worker interface is the designed-for case.
 
 ## Antimeridian and pole-crossing polygons
 

@@ -1,7 +1,21 @@
 # ADR 0007 — Presence read strategy: folded lock+read wins
 
-- **Status**: Accepted — closed by measurement (docs/PRESENCE_READ_MEASUREMENT.md)
+- **Status**: Superseded by [ADR 0011](0011-partitioned-async-architecture.md) for the target architecture (2026-08-09); remains the governing decision for the synchronous system as built
 - **Date**: 2026-08-07
+
+> **Supersession note — the constraint moved; the measurement did not.** The
+> cache lost here for a precise mechanical reason: correctness required the
+> cache read to sit *inside the locked transaction* (cache-under-lock, ADR
+> 0002), so a Redis hop was added on top of the Postgres round trip it was
+> meant to replace, and invalidation churn collapsed the hit rate under
+> transitions. In the target architecture the worker resolves previous
+> membership Redis→Postgres *before* opening any transaction — the read is no
+> longer under the lock, which removes exactly the mechanism that made the
+> cache lose. The correctness finding (a stale hit can suppress a genuine
+> re-entry) was real and remains binding: ADR 0011 answers it by re-verifying
+> presence authoritatively under the lock on the ~1% change path, which is the
+> "verify-on-hit" this ADR said would be required. Numbers, method, and the
+> folded decision for the synchronous system all stand.
 
 ## Context
 

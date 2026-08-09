@@ -11,7 +11,68 @@ under load — the case's central requirement — is answered in
 Decisions and project state live in [CLAUDE.md](CLAUDE.md); reasoning lives in
 [docs/ADR/](docs/ADR/README.md); working conventions live in [.claude/](.claude/README.md).
 
-## Architecture — the five-minute version
+## The target architecture — where this is heading
+
+> **None of this section is built yet.** It is the recorded direction
+> ([ADR 0011](docs/ADR/0011-partitioned-async-architecture.md)), being built in
+> phases N2–N6; everything after this section describes the synchronous system
+> that exists and runs today.
+
+```
+  mobile client — adaptive sending: ≥10 s since last send, ≥50 m moved, usable accuracy
+        │
+        │  POST /locations  { userId, deviceId, seq, lat, lng, capturedAt, accuracy }
+        ▼
+  stateless API ──── validate, stamp receivedAt ────────────────►  202 Accepted
+        │                                                          (no DB touch,
+        │  publish                                                  no transition result)
+        ▼
+  partitioned queue — FIXED 256 partitions, key = hash(userId)
+        │              same user → same partition → per-user order preserved
+        ▼
+  worker — owns SEVERAL partitions (worker count independent of partition count)
+        │    one user's events in order; different users in parallel
+        │
+        │  1. dedup (deviceId, seq)
+        │  2. point-in-polygon from IN-MEMORY versioned polygon snapshot
+        │  3. previous membership: Redis → Postgres, lazily
+        ▼
+  ┌─────────────────────  AREA CHANGED?  ─────────────────────┐
+  │                                                           │
+  │  NO  (~99% of traffic)                YES  (~1%)          │
+  ▼                                       ▼                   │
+  acknowledge.                            ENTER / EXIT event  │
+  No write. No database.                  ONE Postgres txn:   │
+  Nothing happens — by design.            advisory lock,      │
+                                          re-verify presence, │
+                                          ON CONFLICT arbiter,│
+                                          presence + log      │
+                                          ▼                   │
+                                          ack AFTER commit    │
+                                          (worker dies ⇒      │
+                                           redelivery, clean) │
+  └───────────────────────────────────────────────────────────┘
+
+  POST /areas ──► Postgres (source of truth + ST_IsValid) ──► bump area version
+                 ──► publish invalidation ──► workers reload snapshot
+                     (periodic version polling self-heals a missed notification)
+```
+
+**Why this shape.** Each layer scales with a different thing: the API with
+instances (it holds no state and touches no database), the queue with its fixed
+partition count (256 partitions serve a million users — same user, same lane),
+workers with load (ownership rebalances; a slow user delays only their own
+lane), and Postgres with **membership changes only** — the ~1% of events on the
+right branch of the fork. That fork is the design: the shared resource every
+per-ping round trip used to consume (Postgres connections, PostGIS execution)
+leaves the per-event path entirely, and the queue absorbs bursts that the
+synchronous system can only shed with 503s. The database remains the source of
+truth and the final arbiter — the advisory lock and `ON CONFLICT` survive
+unchanged inside the 1% path, because a rebalance window can briefly hand one
+partition to two workers and the message layer's ordering promise is not a
+correctness foundation.
+
+## Architecture as built today — the five-minute version
 
 **Entry is a transition, not a state.** A user sitting inside an area for ten minutes
 must produce one log, not sixty — so every location report is compared against where
@@ -53,11 +114,13 @@ The case requires the system to "perform well under load and be capable of handl
 large number of concurrent requests." That sentence contains two different problems —
 being *correct* when requests race, and having *capacity* when they pile up — plus a
 third the requirement implies: degrading in a bounded way when capacity runs out.
-This section answers all three, with numbers. Every number below was measured on one
-development box (Windows/WSL2 Docker, generator + app + Postgres co-located,
-same-host database, warm connection pool) via closed-loop load against the real
-production artifact — 10,000 distinct users, four concurrency levels, two workload
-shapes; full method in
+This section answers all three, with numbers, **for the synchronous system as built
+today** — these measurements are the baseline the target architecture (above) starts
+from, and they remain the honest description of what currently runs. Every number
+below was measured on one development box (Windows/WSL2 Docker, generator + app +
+Postgres co-located, same-host database, warm connection pool) via closed-loop load
+against the real production artifact — 10,000 distinct users, four concurrency
+levels, two workload shapes; full method in
 [docs/PRESENCE_READ_MEASUREMENT.md](docs/PRESENCE_READ_MEASUREMENT.md). The system
 has **not** been run at 10,000 req/s, and nothing here implies otherwise.
 
@@ -137,28 +200,21 @@ Nothing here was added because it sounded fast. What was tried:
   mostly idle-in-transaction; more connections change nothing while Node is the
   wall. [ADR 0009](docs/ADR/0009-connection-and-query-bounds.md)
 
-### Two optimisations deliberately not implemented
+### Two optimisations that were deferred — and how each resolved
 
-Decisions with revisit conditions, not a to-do list:
+Both were recorded as decisions with revisit conditions; the target architecture
+resolved both:
 
-- **Collapsing the request into one round trip.** The spatial query, lock, set
-  difference and writes could live in a single PL/pgSQL function — 4 round trips to
-  1, and it would also shed Node-side work, which is where the bottleneck actually
-  is. Not done: it moves the entire transition model into SQL, where it is harder
-  to test and read than the current TypeScript; the gain is unmeasured; and
-  horizontal scaling delivers a larger improvement for less risk. Revisit when a
-  measurement shows per-request round trips dominating *after* the Node ceiling has
-  been lifted by scaling out.
-- **Polygon caching.** If any cache is ever warranted, the polygons are the right
-  target — near-static, small, identical for every user, read outside any lock —
-  and [ADR 0003](docs/ADR/0003-spatial-query-strategy.md) keeps application-layer
-  point-in-polygon open "until the per-request round trip is a measured
-  bottleneck". Not done now: with Node as the wall, removing a database round trip
-  runs into the same ~1,600 req/s ceiling, and multi-instance invalidation needs a
-  broadcast component. The cheap experiment that settles it: stub the spatial query
-  with a fixed result and re-run `scripts/measure-presence.mjs` — if throughput
-  moves from ~1,600 toward ~3,000 it's worth building; if it barely moves, it's
-  noise.
+- **Polygon caching** — the revisit condition *fired*. The pre-registered
+  experiment (stub the spatial query, re-run the harness) measured the round
+  trip's removal at **+43–50%** (1,986 → 2,835 req/s static at c=500, ADR 0003
+  annotations), so the in-memory versioned polygon snapshot is now **phase N2**
+  of the target architecture, with area-version invalidation answering the
+  multi-instance question.
+- **Collapsing the request into one round trip** — *dissolved rather than
+  built*: the worker model removes the per-ping round trips wholesale, which is
+  what the PL/pgSQL fold was for. The analysis stays in git history; no revisit
+  condition remains.
 
 ## The adaptive client contract (design assumption, ADR 0010)
 
