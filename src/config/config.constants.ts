@@ -4,6 +4,7 @@ export enum ConfigNamespace {
   Database = 'database',
   Mq = 'mq',
   Redis = 'redis',
+  Worker = 'worker',
 }
 
 export enum NodeEnvironment {
@@ -34,6 +35,7 @@ export enum EnvKey {
   RabbitMqPort = 'RABBITMQ_PORT',
   RabbitMqUser = 'RABBITMQ_USER',
   RabbitMqPassword = 'RABBITMQ_PASSWORD',
+  WorkerPartitions = 'WORKER_PARTITIONS',
 }
 
 /**

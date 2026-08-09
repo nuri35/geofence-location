@@ -44,7 +44,15 @@ export class LocationsService {
    * nothing; a stale cache saying "unchanged" suppresses the fast path for at most
    * the cache TTL (the exposure ADR 0013 measures and records).
    */
-  async report(dto: ReportLocationDto): Promise<LocationReportResponseDto> {
+  async report(
+    dto: ReportLocationDto,
+    // recorded_at is the time the SYSTEM accepted the event (decision 8), captured
+    // once and passed to both the presence row and its log row so they cannot
+    // disagree. The default is "now" (the synchronous/service-level path); the N4C
+    // worker passes the message's receivedAt instead — under backlog the log must
+    // record acceptance time, never worker-processing time (ADR 0015/0016).
+    recordedAt: Date = new Date(),
+  ): Promise<LocationReportResponseDto> {
     // ADR 0010: semantic gate, deliberately 422 not 400 — the request is well-formed;
     // a reading with this error radius just cannot answer "inside or outside".
     if (dto.accuracy !== undefined && dto.accuracy > MAX_ACCURACY_METERS) {
@@ -52,10 +60,6 @@ export class LocationsService {
         `accuracy ${dto.accuracy}m exceeds the usable maximum of ${MAX_ACCURACY_METERS}m: a reading this uncertain cannot be checked against area boundaries`,
       );
     }
-
-    // recorded_at is the server receive time (decision 8), captured once and passed
-    // explicitly to both the presence row and its log row so they cannot disagree.
-    const recordedAt = new Date();
     // ADR 0010: capturedAt replaces observedAt; the deprecated alias is honored for
     // pre-contract clients, capturedAt winning when both are sent.
     const capturedAt = dto.capturedAt ?? dto.observedAt ?? null;

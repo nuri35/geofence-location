@@ -296,7 +296,7 @@ the contract send neither field and are processed without deduplication.
 | Database   | PostgreSQL 16 + PostGIS 3.4 (`postgis/postgis`) |
 | ORM        | TypeORM 0.3 (DataSource + migrations, no sync)  |
 | Cache      | Redis 7 — presence cache behind the no-change fast path (ADR 0013; first attempt was measured and removed under the old shape, ADR 0007) |
-| Queue      | RabbitMQ 3.13 + consistent-hash exchange (ADR 0014). The API publishes with confirms as of N4B (ADR 0015); **no consumer exists yet — events accumulate until N4C's worker lands** |
+| Queue      | RabbitMQ 3.13 + consistent-hash exchange (ADR 0014). The API publishes with confirms (ADR 0015); the worker consumes its assigned partitions and processes transitions (ADR 0016) — the loop is closed |
 | Validation | class-validator / class-transformer, Joi (env)  |
 | Testing    | Jest 29, Supertest (e2e, dedicated test DB)     |
 | Local infra| Docker Compose                                  |
@@ -313,7 +313,8 @@ cp .env.example .env        # defaults work with the compose services as-is
 docker compose up -d        # PostGIS + Redis + RabbitMQ (healthchecked) + one-shot MQ topology job
 npm install
 npm run migration:run       # PostGIS extension → areas → logs → presence → lock function
-npm run start:dev
+npm run start:dev           # the API (validate → publish → 202)
+npm run start:worker        # the worker (consume → transition → log) — build first: npm run build
 ```
 
 The API listens on `http://localhost:3000`. Health: `GET /health`. Swagger UI: `/docs`.

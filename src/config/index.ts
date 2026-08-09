@@ -5,5 +5,6 @@ export * from './database.config';
 export * from './env.util';
 export * from './mq.config';
 export * from './redis.config';
+export * from './worker.config';
 export * from './env.validation';
 export * from './typeorm.config';

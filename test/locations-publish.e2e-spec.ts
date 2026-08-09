@@ -94,6 +94,21 @@ describe('Locations publishing (e2e, N4B — ADR 0015)', () => {
     request(app.getHttpServer()).post('/locations').send(body);
 
   beforeAll(async () => {
+    // This spec asserts messages REMAIN in the partitions. Any attached consumer
+    // (a worker process, a lingering worker-loop context, an IDE-launched run)
+    // would eat them and turn every assertion into a mystery — fail fast instead.
+    for (let i = 0; i < PARTITIONS; i += 1) {
+      const queue = (await mgmt('GET', `/queues/%2F/loc.events.p${i}`)) as {
+        consumers?: number;
+      };
+      if ((queue.consumers ?? 0) > 0) {
+        throw new Error(
+          `loc.events.p${i} has ${queue.consumers} consumer(s) attached — a worker is running; ` +
+            'stop it before this spec (it asserts message presence)',
+        );
+      }
+    }
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();

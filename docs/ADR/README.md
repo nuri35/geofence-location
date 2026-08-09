@@ -17,3 +17,4 @@
 | [0013](0013-presence-cache-no-change-fast-path.md) | Redis presence cache with a no-change fast path (Phase N3) | Accepted | 2026-08-09 |
 | [0014](0014-rabbitmq-topology.md) | RabbitMQ topology with consistent-hash partitioning (Phase N4A) | Accepted | 2026-08-09 |
 | [0015](0015-publisher-contract.md) | The API becomes a publisher: 202 contract and the location event schema (Phase N4B) | Accepted | 2026-08-09 |
+| [0016](0016-worker.md) | The worker: static partition ownership, lazy dedup, ack-after-commit (Phase N4C) | Accepted | 2026-08-09 |
