@@ -9,6 +9,10 @@ const requiredEnv = {
   [EnvKey.PostgresDb]: 'geofence',
   [EnvKey.RedisHost]: 'localhost',
   [EnvKey.RedisPort]: 6379,
+  [EnvKey.RabbitMqHost]: 'localhost',
+  [EnvKey.RabbitMqPort]: 5672,
+  [EnvKey.RabbitMqUser]: 'geofence',
+  [EnvKey.RabbitMqPassword]: 'geofence',
 };
 
 describe('envValidationSchema — Redis vars (ADR 0013)', () => {

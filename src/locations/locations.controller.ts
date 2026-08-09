@@ -1,4 +1,4 @@
-import { Body, Controller, HttpStatus, Post, Res } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiOperation,
@@ -6,30 +6,34 @@ import {
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
-import { Response } from 'express';
 
 import { ApiEnvelopedResponse } from '@app/common/decorators';
 import { ErrorResponseDto } from '@app/common/dto';
 
-import { LocationReportResponseDto, ReportLocationDto } from './dto';
-import { LocationsService } from './locations.service';
+import { LocationAcceptedDto, ReportLocationDto } from './dto';
+import { LocationIngestService } from './location-ingest.service';
 
 @ApiTags('locations')
 @Controller('locations')
 export class LocationsController {
-  constructor(private readonly locationsService: LocationsService) {}
+  constructor(private readonly ingestService: LocationIngestService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Report a location; logs an entry event per newly entered area' })
-  @ApiEnvelopedResponse(LocationReportResponseDto, {
-    status: 201,
-    description: 'Fresh event processed; entries produced (decision 11), wrapped in the envelope',
-  })
-  @ApiEnvelopedResponse(LocationReportResponseDto, {
-    status: 200,
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Accept a location event for asynchronous processing (N4B, ADR 0015)',
     description:
-      'Duplicate event (seq not newer than the last processed for this userId+deviceId) — ' +
-      'acknowledged without reprocessing, duplicate: true (ADR 0010)',
+      'Validates, stamps receivedAt, publishes to the partitioned queue, and returns 202 ' +
+      'with the eventId. Processing is EVENTUALLY CONSISTENT: after a successful response, ' +
+      'a resulting entry may not appear in GET /logs until a worker has consumed the event — ' +
+      'this is expected behaviour, not a bug. The response carries no enteredAreaIds because ' +
+      'nothing has computed them at response time (the pre-N4 contract, decision 11, is retired).',
+  })
+  @ApiEnvelopedResponse(LocationAcceptedDto, {
+    status: 202,
+    description:
+      'Event durably queued (publisher-confirmed). Entries, if any, appear in GET /logs ' +
+      'after asynchronous processing — eventual consistency by design.',
   })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
@@ -38,29 +42,23 @@ export class LocationsController {
   })
   @ApiUnprocessableEntityResponse({
     type: ErrorResponseDto,
-    description: `Well-formed but unusable: GPS accuracy above the usable maximum (ADR 0010)`,
+    description: 'Well-formed but unusable: GPS accuracy above the usable maximum (ADR 0010)',
   })
   @ApiServiceUnavailableResponse({
     type: ErrorResponseDto,
     description:
-      'Transient overload (pool acquire, statement ceiling — ADR 0009). Retry after the ' +
-      'Retry-After value; retrying this endpoint is safe by construction.',
+      'The event could NOT be durably queued (broker unavailable or publish unconfirmed — ' +
+      'ADR 0015) or a transient database bound fired (ADR 0009). Nothing was stored; retry ' +
+      'after the Retry-After value. Retrying is safe: the adaptive client re-sends its ' +
+      'position on the next ping anyway.',
     headers: {
       'Retry-After': {
-        description: 'Seconds to wait before retrying; chosen to land past the stall envelope',
+        description: 'Seconds to wait before retrying',
         schema: { type: 'string', example: '5' },
       },
     },
   })
-  async report(
-    @Body() dto: ReportLocationDto,
-    @Res({ passthrough: true }) response: Response,
-  ): Promise<LocationReportResponseDto> {
-    const result = await this.locationsService.report(dto);
-    if (result.duplicate) {
-      // Not an error and not a creation: the event was genuinely already handled.
-      response.status(HttpStatus.OK);
-    }
-    return result;
+  report(@Body() dto: ReportLocationDto): Promise<LocationAcceptedDto> {
+    return this.ingestService.accept(dto);
   }
 }

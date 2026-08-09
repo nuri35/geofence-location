@@ -24,6 +24,7 @@ was built. Five minutes, then start working.
 | Touch the in-memory spatial index, snapshot rebuild/polling, or `area_version` | `docs/ADR/0012-in-memory-spatial-index.md` + the equivalence harness `test/spatial-equivalence.e2e-spec.ts` |
 | Touch the presence cache, the no-change fast path, or Redis | `docs/ADR/0013-presence-cache-no-change-fast-path.md` + the provocation spec `test/stale-presence.e2e-spec.ts` |
 | Touch the queue topology, partitions, or `infra/rabbitmq/` | `docs/ADR/0014-rabbitmq-topology.md` — the app NEVER declares topology; the partition count is effectively immutable |
+| Touch publishing, the 202 contract, or the location event schema | `docs/ADR/0015-publisher-contract.md` — the message is v1 and consumers depend on it; change it only with a version bump |
 | Commit | Run the green chain (or the `verifier` agent) first. The full chain is defined in `skills/testing-verification`. |
 
 Claude Code loads skill descriptions automatically and should reach for these on

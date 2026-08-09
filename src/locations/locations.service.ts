@@ -30,6 +30,12 @@ export class LocationsService {
   ) {}
 
   /**
+   * OFF THE HTTP PATH SINCE N4B (ADR 0015): no controller calls this — POST
+   * /locations publishes to the queue instead. This method IS the transition
+   * processor N4C mounts in the worker; it stays fully covered by its unit suite
+   * and by the service-level e2e specs until then. Deleting it in N4B would have
+   * left the repository with no working transition path at all between phases.
+   *
    * The ADR 0002 transition path behind the ADR 0013 no-change fast path. The cache
    * answers ONE question — "do I need to write?" — read without the lock and without
    * a transaction. Postgres always answers "what do I write?": every writing path

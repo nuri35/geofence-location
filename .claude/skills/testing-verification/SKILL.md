@@ -55,6 +55,14 @@ Jest 29 + ts-jest, Supertest 7. Two suites with different trust models.
   env restore it in afterAll — keep doing that), and the logs pagination
   invariants walk the SHARED table, so concurrent suites' inserts land inside
   the walk. Serial cost measured at ~21 s vs ~16 s parallel; determinism won cheap.
+- **POST /locations publishes since N4B (ADR 0015)** — transition semantics are
+  exercised at SERVICE level (`app.get(LocationsService).report(...)`) in the
+  acceptance/N3 specs; HTTP specs assert only what still lives at HTTP
+  (validation, accuracy gate, the 202 publish contract in
+  locations-publish.e2e-spec, which also asserts real broker placement). The
+  app now REQUIRES a healthy RabbitMQ to boot (passive exchange verify) — a
+  down broker fails every e2e suite at app.init, unlike Redis which stays
+  optional.
 - **Redis in e2e**: the compose Redis is shared and persistent, so
   test/global-setup.ts FLUSHDBs it per run (the cache is disposable by design) —
   without that, stale `presence:*` keys from a previous run gate the fast path

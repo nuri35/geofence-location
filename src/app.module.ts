@@ -13,6 +13,7 @@ import { RedisModule } from '@app/redis/redis.module';
 import { appConfig } from '@config/app.config';
 import { areasConfig } from '@config/areas.config';
 import { databaseConfig } from '@config/database.config';
+import { mqConfig } from '@config/mq.config';
 import { redisConfig } from '@config/redis.config';
 import { envValidationSchema } from '@config/env.validation';
 import { typeOrmModuleFactory } from '@config/typeorm.config';
@@ -21,7 +22,7 @@ import { typeOrmModuleFactory } from '@config/typeorm.config';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, areasConfig, databaseConfig, redisConfig],
+      load: [appConfig, areasConfig, databaseConfig, mqConfig, redisConfig],
       validationSchema: envValidationSchema,
       validationOptions: {
         abortEarly: true,

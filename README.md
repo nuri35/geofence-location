@@ -296,7 +296,7 @@ the contract send neither field and are processed without deduplication.
 | Database   | PostgreSQL 16 + PostGIS 3.4 (`postgis/postgis`) |
 | ORM        | TypeORM 0.3 (DataSource + migrations, no sync)  |
 | Cache      | Redis 7 — presence cache behind the no-change fast path (ADR 0013; first attempt was measured and removed under the old shape, ADR 0007) |
-| Queue      | RabbitMQ 3.13 + consistent-hash exchange — topology only as of N4A; nothing publishes or consumes yet (ADR 0014) |
+| Queue      | RabbitMQ 3.13 + consistent-hash exchange (ADR 0014). The API publishes with confirms as of N4B (ADR 0015); **no consumer exists yet — events accumulate until N4C's worker lands** |
 | Validation | class-validator / class-transformer, Joi (env)  |
 | Testing    | Jest 29, Supertest (e2e, dedicated test DB)     |
 | Local infra| Docker Compose                                  |
@@ -322,7 +322,7 @@ The API listens on `http://localhost:3000`. Health: `GET /health`. Swagger UI: `
 
 | Endpoint | Behaviour |
 | --- | --- |
-| `POST /locations` | Report a position; returns 201 `{ enteredAreaIds: [...], duplicate: false }` — the entries this request produced. Optional `deviceId`+`seq` enable per-device dedup (repeats → 200, `duplicate: true`); `accuracy` > 100 m → 422; `capturedAt` stored, informational (ADR 0010) |
+| `POST /locations` | **Accepts a position for asynchronous processing (N4B, ADR 0015): returns 202 `{ eventId }`.** The event is durably queued (publisher-confirmed); **`GET /logs` may not show a resulting entry until a worker consumes it — eventual consistency by design, not a bug.** `accuracy` > 100 m → 422 before any publish; a publish that cannot be confirmed → 503 + `Retry-After` (nothing stored — the client re-sends on its next adaptive ping); `deviceId`+`seq` travel to the worker for dedup there |
 | `POST /areas` | Create an area from a GeoJSON Polygon (`[lng, lat]` order; ≤1000 vertices; `ST_IsValid`-gated with the reason in the 400) |
 | `GET /areas` | List areas with full GeoJSON geometry, `limit`/`offset` |
 | `GET /logs` | Entry log, newest first, keyset-paginated over `(recorded_at, id)` via an opaque cursor (`nextCursor`, null at the end); optional combinable filters `userId`, `areaId`, `from`/`to` on `recorded_at`; page size 50, max 500 |

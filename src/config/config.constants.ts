@@ -2,6 +2,7 @@ export enum ConfigNamespace {
   App = 'app',
   Areas = 'areas',
   Database = 'database',
+  Mq = 'mq',
   Redis = 'redis',
 }
 
@@ -29,6 +30,10 @@ export enum EnvKey {
   RedisPassword = 'REDIS_PASSWORD',
   PresenceCacheTtlEmptyS = 'PRESENCE_CACHE_TTL_EMPTY_S',
   PresenceCacheTtlNonEmptyS = 'PRESENCE_CACHE_TTL_NONEMPTY_S',
+  RabbitMqHost = 'RABBITMQ_HOST',
+  RabbitMqPort = 'RABBITMQ_PORT',
+  RabbitMqUser = 'RABBITMQ_USER',
+  RabbitMqPassword = 'RABBITMQ_PASSWORD',
 }
 
 /**

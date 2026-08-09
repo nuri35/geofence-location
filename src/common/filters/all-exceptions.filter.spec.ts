@@ -118,6 +118,20 @@ describe('AllExceptionsFilter', () => {
       expect(status).toHaveBeenCalledWith(503);
       expect(setHeader).toHaveBeenCalledWith('Retry-After', '5');
     });
+
+    it('maps an unconfirmed queue publish via the ADR 0015 marker, leaking nothing', () => {
+      filter.catch(
+        Object.assign(new Error('message broker unavailable: confirm not received within 5000ms'), {
+          transientPublishFailure: true,
+        }),
+        host,
+      );
+
+      expect(status).toHaveBeenCalledWith(503);
+      expect(setHeader).toHaveBeenCalledWith('Retry-After', '5');
+      expect(sentBody().message).toBe('Service temporarily unavailable, retry later');
+      expect(JSON.stringify(sentBody())).not.toContain('broker');
+    });
   });
 
   it('does not treat expose=false or 5xx middleware errors as client-safe', () => {

@@ -11,6 +11,14 @@ Response contracts are decided: `POST /locations` returns 201 with
 and validation failures are 400 (CLAUDE.md hard constraints). Scenarios assert
 observable state throughout; scenario 13 asserts the response body itself.
 
+> **N4B note (ADR 0015):** `POST /locations` publishes instead of processing, so
+> the transition scenarios below execute **at service level** — the same
+> `LocationsService.report()` the N4C worker mounts — against the real database,
+> cache and advisory lock. HTTP-layer scenarios (validation, the accuracy gate)
+> remain at HTTP; the 202 publish contract is pinned by
+> `test/locations-publish.e2e-spec.ts`. N4D re-points the transition scenarios
+> at the full async path (publish → worker → logs).
+
 ## Scenario → test map
 
 | # | Proven by |

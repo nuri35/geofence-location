@@ -50,6 +50,10 @@ export const envValidationSchema = Joi.object({
     .integer()
     .min(1)
     .default(DEFAULT_PRESENCE_CACHE_TTL_NONEMPTY_S),
+  [EnvKey.RabbitMqHost]: Joi.string().required(),
+  [EnvKey.RabbitMqPort]: Joi.number().port().required(),
+  [EnvKey.RabbitMqUser]: Joi.string().required(),
+  [EnvKey.RabbitMqPassword]: Joi.string().required(),
 }).custom((env: Record<string, unknown>) => {
   // ADR 0009: acquire < statement < idle-in-transaction. Waiting longer for a
   // connection than the bound on what holds connections just grows the queue, and a

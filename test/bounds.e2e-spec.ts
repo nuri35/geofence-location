@@ -5,10 +5,12 @@ import { App } from 'supertest/types';
 import { DataSource, QueryRunner } from 'typeorm';
 
 import { AppModule } from '@app/app.module';
+import { LocationsService } from '@app/locations/locations.service';
 
 describe('Connection and query bounds (e2e, ADR 0009)', () => {
   let app: INestApplication<App>;
   let dataSource: DataSource;
+  let locationsService: LocationsService;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -17,6 +19,7 @@ describe('Connection and query bounds (e2e, ADR 0009)', () => {
     app = moduleFixture.createNestApplication();
     await app.init();
     dataSource = app.get(DataSource);
+    locationsService = app.get(LocationsService);
   });
 
   afterAll(async () => {
@@ -33,10 +36,13 @@ describe('Connection and query bounds (e2e, ADR 0009)', () => {
     expect(idle[0].idle_in_transaction_session_timeout).toBe('10s');
   });
 
-  it('a held advisory lock turns into a 503 with Retry-After after the statement ceiling, leaking nothing', async () => {
+  it('a held advisory lock hits the statement ceiling, not an unbounded wait (service level since N4B)', async () => {
     // Since ADR 0013 a request only reaches the advisory lock when a membership
     // diff exists — seed a presence row so the report at (0,0) is a departure.
     // Coordinate claim: bounds uses lng 46..48 for this throwaway area.
+    // Since N4B (ADR 0015) POST /locations publishes instead of locking, so the
+    // lock bound is exercised through the transition service — the code N4C
+    // mounts in the worker, where this ceiling is what bounds a stuck partition.
     const areaRows = await dataSource.query<Array<{ id: string }>>(
       `INSERT INTO areas (name, boundary)
        VALUES ('bounds-area', ST_GeomFromText('POLYGON((46 0, 48 0, 48 2, 46 2, 46 0))', 4326))
@@ -53,21 +59,11 @@ describe('Connection and query bounds (e2e, ADR 0009)', () => {
     await holder.query("SELECT pg_advisory_xact_lock(hashtext('bounds-lock-u'))");
     try {
       const started = Date.now();
-      const response = await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'bounds-lock-u', lng: 0, lat: 0 })
-        .expect(503);
+      await expect(
+        locationsService.report({ userId: 'bounds-lock-u', lng: 0, lat: 0 }),
+      ).rejects.toMatchObject({ driverError: { code: '57014' } }); // statement_timeout fired
       const elapsed = Date.now() - started;
-
       expect(elapsed).toBeGreaterThan(4500); // waited the statement ceiling, not a fast failure
-      expect(response.headers['retry-after']).toBe('5');
-      expect(response.body).toMatchObject({
-        statusCode: 503,
-        path: '/locations',
-        message: 'Service temporarily unavailable, retry later',
-      });
-      expect(JSON.stringify(response.body)).not.toContain('advisory');
-      expect(JSON.stringify(response.body)).not.toContain('canceling statement');
     } finally {
       await holder.rollbackTransaction();
       await holder.release();
@@ -83,11 +79,10 @@ describe('Connection and query bounds (e2e, ADR 0009)', () => {
       holders.push(runner);
     }
     try {
+      // Since N4B POST /locations no longer touches the pool — the HTTP 503 shape
+      // is exercised through GET /logs, which still reads Postgres per request.
       const started = Date.now();
-      const response = await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'bounds-pool-u', lng: 0, lat: 0 })
-        .expect(503);
+      const response = await request(app.getHttpServer()).get('/logs?limit=1').expect(503);
       const elapsed = Date.now() - started;
 
       expect(elapsed).toBeGreaterThan(1500); // waited the acquire bound…
@@ -108,7 +103,7 @@ describe('Connection and query bounds (e2e, ADR 0009)', () => {
     await request(app.getHttpServer())
       .post('/locations')
       .send({ userId: 'bounds-normal-u', lng: 0, lat: 0 })
-      .expect(201);
+      .expect(202);
     await request(app.getHttpServer()).get('/logs?limit=1').expect(200);
   });
 });

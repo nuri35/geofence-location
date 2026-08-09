@@ -10,10 +10,12 @@ import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 
 import { AppModule } from '@app/app.module';
+import { LocationsService } from '@app/locations/locations.service';
 
 /**
  * Snapshot lifecycle behaviour (ADR 0012). Coordinate plane claim: lng 105..115
- * (see testing-verification skill).
+ * (see testing-verification skill). Transition calls go through the service since
+ * N4B (ADR 0015) — POST /locations publishes instead of processing.
  */
 
 interface Envelope<T> {
@@ -47,14 +49,10 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 describe('Area snapshot lifecycle (e2e)', () => {
   let app: INestApplication<App>;
   let dataSource: DataSource;
+  let locationsService: LocationsService;
 
-  const report = async (userId: string, lng: number, lat: number): Promise<ReportResponse> => {
-    const response = await request(app.getHttpServer())
-      .post('/locations')
-      .send({ userId, lng, lat })
-      .expect(201);
-    return (response.body as Envelope<ReportResponse>).data;
-  };
+  const report = (userId: string, lng: number, lat: number): Promise<ReportResponse> =>
+    locationsService.report({ userId, lng, lat });
 
   /** Simulates ANOTHER instance creating an area: raw SQL + version bump, no local refresh. */
   const createAreaOutOfBand = async (name: string, boundary: object): Promise<string> => {
@@ -74,6 +72,7 @@ describe('Area snapshot lifecycle (e2e)', () => {
     app = moduleFixture.createNestApplication();
     await app.init();
     dataSource = app.get(DataSource);
+    locationsService = app.get(LocationsService);
   });
 
   afterAll(async () => {
@@ -120,17 +119,12 @@ describe('Area snapshot lifecycle (e2e)', () => {
 
     const bump = createAreaOutOfBand('snap-race-newcomer', square(113, 0, 2));
     const reports = Promise.all(
-      Array.from({ length: 30 }, (_, i) =>
-        request(app.getHttpServer())
-          .post('/locations')
-          .send({ userId: `u-snap-race-${i}`, lng: 113, lat: 5 }),
-      ),
+      Array.from({ length: 30 }, (_, i) => report(`u-snap-race-${i}`, 113, 5)),
     );
-    const [, responses] = await Promise.all([bump, reports]);
+    const [, results] = await Promise.all([bump, reports]);
 
-    for (const response of responses) {
-      expect(response.status).toBe(201);
-      expect((response.body as Envelope<ReportResponse>).data.enteredAreaIds).toEqual([stableId]);
+    for (const result of results) {
+      expect(result.enteredAreaIds).toEqual([stableId]);
     }
     const presence = await dataSource.query<Array<{ user_id: string }>>(
       "SELECT user_id FROM user_area_presence WHERE area_id = $1 AND user_id LIKE 'u-snap-race-%'",

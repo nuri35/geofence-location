@@ -56,13 +56,13 @@ describe('OpenAPI document (e2e)', () => {
     );
   });
 
-  it('POST /locations 201 is enveloped around LocationReportResponseDto', () => {
-    const schema = schemaOf('/locations', 'post', '201');
+  it('POST /locations 202 is enveloped around LocationAcceptedDto (N4B, ADR 0015)', () => {
+    const schema = schemaOf('/locations', 'post', '202');
     expect(isEnveloped(schema)).toBe(true);
     const data = (
       (schema.allOf as Array<Record<string, unknown>>)[1].properties as Record<string, unknown>
     ).data as Record<string, unknown>;
-    expect(data.$ref).toBe('#/components/schemas/LocationReportResponseDto');
+    expect(data.$ref).toBe('#/components/schemas/LocationAcceptedDto');
   });
 
   it('GET /areas 200 is enveloped around an ARRAY of AreaResponseDto', () => {

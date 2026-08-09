@@ -5,6 +5,17 @@ import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 
 import { AppModule } from '@app/app.module';
+import { LocationsService } from '@app/locations/locations.service';
+
+/**
+ * ACCEPTANCE SCENARIOS AT SERVICE LEVEL SINCE N4B (ADR 0015): POST /locations no
+ * longer processes transitions — it publishes (see locations-publish.e2e-spec).
+ * The transition semantics below still run against the REAL service, database,
+ * cache and advisory lock via LocationsService.report(), which is exactly the
+ * code N4C mounts in the worker. N4D re-points these scenarios at the full
+ * async path (publish → worker → logs). HTTP-layer tests (validation, the
+ * accuracy gate) stay at HTTP, where those contracts still live.
+ */
 
 interface Envelope<T> {
   statusCode: number;
@@ -40,6 +51,7 @@ const square = (lngBase: number, latBase: number, size: number): object => ({
 describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
   let app: INestApplication<App>;
   let dataSource: DataSource;
+  let locationsService: LocationsService;
   // Area A: x 0..10, y 0..10. Area B overlaps A: x 5..15, y 5..15.
   let areaA: string;
   let areaB: string;
@@ -52,18 +64,18 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
     return (response.body as Envelope<{ id: string }>).data.id;
   };
 
-  const report = async (
+  const report = (
     userId: string,
     lng: number,
     lat: number,
     capturedAt?: string,
-  ): Promise<ReportResponse> => {
-    const response = await request(app.getHttpServer())
-      .post('/locations')
-      .send({ userId, lng, lat, ...(capturedAt === undefined ? {} : { capturedAt }) })
-      .expect(201);
-    return (response.body as Envelope<ReportResponse>).data;
-  };
+  ): Promise<ReportResponse> =>
+    locationsService.report({
+      userId,
+      lng,
+      lat,
+      ...(capturedAt === undefined ? {} : { capturedAt }),
+    });
 
   const logsFor = (userId: string): Promise<LogRow[]> =>
     dataSource.query<LogRow[]>(
@@ -85,6 +97,7 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
     app = moduleFixture.createNestApplication();
     await app.init();
     dataSource = app.get(DataSource);
+    locationsService = app.get(LocationsService);
     areaA = await createArea('area-A', square(0, 0, 10));
     areaB = await createArea('area-B', square(5, 5, 10));
   });
@@ -153,17 +166,10 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
   });
 
   it('8. writes exactly one log for many identical concurrent requests', async () => {
-    const results = await Promise.all(
-      Array.from({ length: 20 }, () =>
-        request(app.getHttpServer()).post('/locations').send({ userId: 'u-race', lng: 2, lat: 2 }),
-      ),
-    );
+    const results = await Promise.all(Array.from({ length: 20 }, () => report('u-race', 2, 2)));
 
-    for (const response of results) {
-      expect(response.status).toBe(201);
-    }
     const enteredTotal = results
-      .map((response) => (response.body as Envelope<ReportResponse>).data.enteredAreaIds.length)
+      .map((result) => result.enteredAreaIds.length)
       .reduce((sum, count) => sum + count, 0);
     expect(enteredTotal).toBe(1);
     expect(await logsFor('u-race')).toHaveLength(1);
@@ -186,92 +192,106 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
     expect(controlLogs[0].captured_at).toBeNull();
 
     // Deprecated alias (ADR 0010): pre-contract clients sending observedAt still persist.
-    await request(app.getHttpServer())
-      .post('/locations')
-      .send({ userId: 'u-alias', lng: 2, lat: 2, observedAt: '2001-01-01T00:00:00.000Z' })
-      .expect(201);
+    await locationsService.report({
+      userId: 'u-alias',
+      lng: 2,
+      lat: 2,
+      observedAt: '2001-01-01T00:00:00.000Z',
+    });
     const aliasLogs = await logsFor('u-alias');
     expect(new Date(aliasLogs[0].captured_at ?? '').toISOString()).toBe('2001-01-01T00:00:00.000Z');
   });
 
-  describe('ADR 0010 payload contract', () => {
-    it('stops a replayed seq that would WRITE: 200 duplicate under the lock, nothing stored (ADR 0013 contract)', async () => {
-      const first = await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'u-dedup', deviceId: 'phone-1', seq: 1, lng: 2, lat: 2 })
-        .expect(201);
-      expect((first.body as Envelope<ReportResponse>).data).toMatchObject({
-        enteredAreaIds: [areaA],
-        duplicate: false,
+  describe('ADR 0010 payload contract (dedup at service level since N4B)', () => {
+    it('stops a replayed seq that would WRITE: duplicate under the lock, nothing stored (ADR 0013 contract)', async () => {
+      const first = await locationsService.report({
+        userId: 'u-dedup',
+        deviceId: 'phone-1',
+        seq: 1,
+        lng: 2,
+        lat: 2,
       });
-      await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'u-dedup', deviceId: 'phone-1', seq: 2, lng: 50, lat: 50 })
-        .expect(201); // exit processed, last_seq = 2
+      expect(first).toMatchObject({ enteredAreaIds: [areaA], duplicate: false });
+      await locationsService.report({
+        userId: 'u-dedup',
+        deviceId: 'phone-1',
+        seq: 2,
+        lng: 50,
+        lat: 50,
+      }); // exit processed, last_seq = 2
 
       // The replay of seq 1 WOULD produce a re-entry — the change path opens, and
       // the dedup check under the lock stops it before anything is written.
-      const replay = await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'u-dedup', deviceId: 'phone-1', seq: 1, lng: 2, lat: 2 })
-        .expect(200);
-      expect((replay.body as Envelope<ReportResponse>).data).toMatchObject({
-        enteredAreaIds: [],
-        duplicate: true,
+      const replay = await locationsService.report({
+        userId: 'u-dedup',
+        deviceId: 'phone-1',
+        seq: 1,
+        lng: 2,
+        lat: 2,
       });
+      expect(replay).toMatchObject({ enteredAreaIds: [], duplicate: true });
       expect(await logsFor('u-dedup')).toHaveLength(1);
       expect(await presenceFor('u-dedup')).toHaveLength(0);
     });
 
     it('absorbs a NO-CHANGE duplicate on the fast path without the duplicate label (ADR 0013)', async () => {
-      await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'u-dedup-noop', deviceId: 'phone-1', seq: 5, lng: 2, lat: 2 })
-        .expect(201);
-
-      // Same seq, same position: no membership change, so the fast path returns
-      // without consulting dedup state — the duplicate is absorbed by the
-      // transition model itself (201, duplicate: false), and nothing is written.
-      const repeat = await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'u-dedup-noop', deviceId: 'phone-1', seq: 5, lng: 2, lat: 2 })
-        .expect(201);
-      expect((repeat.body as Envelope<ReportResponse>).data).toMatchObject({
-        enteredAreaIds: [],
-        duplicate: false,
+      await locationsService.report({
+        userId: 'u-dedup-noop',
+        deviceId: 'phone-1',
+        seq: 5,
+        lng: 2,
+        lat: 2,
       });
+
+      const repeat = await locationsService.report({
+        userId: 'u-dedup-noop',
+        deviceId: 'phone-1',
+        seq: 5,
+        lng: 2,
+        lat: 2,
+      });
+      expect(repeat).toMatchObject({ enteredAreaIds: [], duplicate: false });
       expect(await logsFor('u-dedup-noop')).toHaveLength(1);
     });
 
     it('processes a newer seq normally', async () => {
-      await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'u-dedup2', deviceId: 'phone-1', seq: 1, lng: 2, lat: 2 })
-        .expect(201);
-      const newer = await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'u-dedup2', deviceId: 'phone-1', seq: 2, lng: 50, lat: 50 })
-        .expect(201);
-      expect((newer.body as Envelope<ReportResponse>).data.duplicate).toBe(false);
+      await locationsService.report({
+        userId: 'u-dedup2',
+        deviceId: 'phone-1',
+        seq: 1,
+        lng: 2,
+        lat: 2,
+      });
+      const newer = await locationsService.report({
+        userId: 'u-dedup2',
+        deviceId: 'phone-1',
+        seq: 2,
+        lng: 50,
+        lat: 50,
+      });
+      expect(newer.duplicate).toBe(false);
       expect(await presenceFor('u-dedup2')).toHaveLength(0); // the exit was processed
     });
 
     it('treats the same seq from a different device independently', async () => {
-      await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'u-multi', deviceId: 'phone-1', seq: 7, lng: 50, lat: 50 })
-        .expect(201);
-      const otherDevice = await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'u-multi', deviceId: 'watch-2', seq: 7, lng: 2, lat: 2 })
-        .expect(201);
-      expect((otherDevice.body as Envelope<ReportResponse>).data).toMatchObject({
-        enteredAreaIds: [areaA],
-        duplicate: false,
+      await locationsService.report({
+        userId: 'u-multi',
+        deviceId: 'phone-1',
+        seq: 7,
+        lng: 50,
+        lat: 50,
       });
+      const otherDevice = await locationsService.report({
+        userId: 'u-multi',
+        deviceId: 'watch-2',
+        seq: 7,
+        lng: 2,
+        lat: 2,
+      });
+      expect(otherDevice).toMatchObject({ enteredAreaIds: [areaA], duplicate: false });
     });
 
-    it('rejects unusable GPS accuracy with 422 in the house error shape', async () => {
+    it('HTTP: rejects unusable GPS accuracy with 422 in the house error shape, before any publish', async () => {
       const response = await request(app.getHttpServer())
         .post('/locations')
         .send({ userId: 'u-acc', lng: 2, lat: 2, accuracy: 150 })
@@ -283,10 +303,10 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
       await request(app.getHttpServer())
         .post('/locations')
         .send({ userId: 'u-acc', lng: 2, lat: 2, accuracy: 12.5 })
-        .expect(201);
+        .expect(202);
     });
 
-    it('rejects deviceId without seq (and vice versa) with 400', async () => {
+    it('HTTP: rejects deviceId without seq (and vice versa) with 400', async () => {
       await request(app.getHttpServer())
         .post('/locations')
         .send({ userId: 'u-pair', deviceId: 'phone-1', lng: 2, lat: 2 })
@@ -298,14 +318,14 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
     });
   });
 
-  it('13. returns 201 naming exactly the areas entered, then an empty array', async () => {
+  it('13. names exactly the areas entered, then an empty array (service result; the HTTP 202 contract lives in locations-publish.e2e-spec)', async () => {
     const first = await report('u-response', 7, 7);
     expect([...first.enteredAreaIds].sort()).toEqual([areaA, areaB].sort());
     const second = await report('u-response', 7, 7);
     expect(second.enteredAreaIds).toEqual([]);
   });
 
-  it('12. rejects out-of-range coordinates and oversized userId with 400', async () => {
+  it('12. HTTP: rejects out-of-range coordinates and oversized userId with 400', async () => {
     await request(app.getHttpServer())
       .post('/locations')
       .send({ userId: 'u', lng: 0, lat: 91 })
@@ -342,7 +362,9 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
 
   it('rolls back the presence row when the log insert fails mid-transaction', async () => {
     // A trigger forces the log insert to fail for one user: if the presence write
-    // survives, the code is writing outside the transaction.
+    // survives, the code is writing outside the transaction. (The HTTP 500 shape
+    // this used to assert moved with the transition path off HTTP — the generic
+    // internal-error contract stays pinned by errors.e2e-spec.)
     await dataSource.query(`
       CREATE OR REPLACE FUNCTION fail_txn_proof() RETURNS trigger AS $$
       BEGIN
@@ -356,22 +378,7 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
         FOR EACH ROW EXECUTE FUNCTION fail_txn_proof();
     `);
     try {
-      const response = await request(app.getHttpServer())
-        .post('/locations')
-        .send({ userId: 'u-txn-proof', lng: 2, lat: 2 })
-        .expect(500);
-
-      // A real driver-level failure must produce the house error shape with a generic
-      // message — nothing from the database error may leak to the client.
-      expect(response.body).toMatchObject({
-        statusCode: 500,
-        path: '/locations',
-        message: 'Internal server error',
-      });
-      expect(typeof (response.body as { timestamp: string }).timestamp).toBe('string');
-      expect(JSON.stringify(response.body)).not.toContain('forced failure');
-      expect(JSON.stringify(response.body)).not.toContain('trg_fail');
-
+      await expect(report('u-txn-proof', 2, 2)).rejects.toThrow('forced failure');
       expect(await presenceFor('u-txn-proof')).toHaveLength(0);
       expect(await logsFor('u-txn-proof')).toHaveLength(0);
     } finally {

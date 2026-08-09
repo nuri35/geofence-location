@@ -105,11 +105,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 
   /**
-   * The three bounded-timeout signatures (ADR 0009): Postgres 57014 (query_canceled —
+   * The bounded-timeout signatures: Postgres 57014 (query_canceled —
    * statement_timeout, including advisory-lock waits), 25P03 (idle-in-transaction
-   * session kill), and pg-pool's acquire timeout, which carries no code and is
-   * matched by its exact message. TypeORM wraps driver errors, so the code may sit
-   * on the exception or on its driverError.
+   * session kill), pg-pool's acquire timeout (no code; matched by its exact
+   * message) — all ADR 0009 — plus the ADR 0015 marker for an unconfirmed queue
+   * publish (MqUnavailableError.transientPublishFailure): the event was NOT
+   * durably queued, nothing was stored, and the adaptive client re-sends anyway,
+   * so it is the same class of transient, safely-retryable failure. TypeORM wraps
+   * driver errors, so the code may sit on the exception or on its driverError.
    */
   private isTransientTimeout(exception: unknown): boolean {
     if (typeof exception !== 'object' || exception === null) {
@@ -119,7 +122,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
       code?: unknown;
       driverError?: { code?: unknown };
       message?: unknown;
+      transientPublishFailure?: unknown;
     };
+    if (candidate.transientPublishFailure === true) {
+      return true;
+    }
     const code = candidate.driverError?.code ?? candidate.code;
     if (code === POSTGRES_QUERY_CANCELED || code === POSTGRES_IDLE_TXN_KILLED) {
       return true;

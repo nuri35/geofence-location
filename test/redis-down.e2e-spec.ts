@@ -13,11 +13,13 @@ import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 
 import { AppModule } from '@app/app.module';
+import { LocationsService } from '@app/locations/locations.service';
 
 /**
  * Acceptance scenario 10, un-retired (ADR 0013): with Redis unreachable the system
  * keeps every transition semantic — correctness never depends on any store but
  * PostgreSQL. Coordinate plane claim: lng 135..145 (see testing-verification skill).
+ * Transition calls go through the service since N4B (ADR 0015).
  */
 
 interface Envelope<T> {
@@ -49,14 +51,11 @@ describe('Redis down (e2e) — scenario 10: transition semantics survive losing 
   let dataSource: DataSource;
   let areaA: string;
   let areaB: string;
+  let locationsService: LocationsService;
 
-  const report = async (userId: string, lng: number, lat: number): Promise<ReportResponse> => {
-    const response = await request(app.getHttpServer())
-      .post('/locations')
-      .send({ userId, lng, lat })
-      .expect(201);
-    return (response.body as Envelope<ReportResponse>).data;
-  };
+  // Service-level since N4B (ADR 0015): POST /locations publishes instead of processing.
+  const report = (userId: string, lng: number, lat: number): Promise<ReportResponse> =>
+    locationsService.report({ userId, lng, lat });
 
   const logsFor = (userId: string): Promise<Array<{ area_id: string }>> =>
     dataSource.query<Array<{ area_id: string }>>(
@@ -72,6 +71,7 @@ describe('Redis down (e2e) — scenario 10: transition semantics survive losing 
     app = moduleFixture.createNestApplication();
     await app.init(); // the boot itself is part of the scenario: no Redis, app up
     dataSource = app.get(DataSource);
+    locationsService = app.get(LocationsService);
 
     const create = async (name: string, lngBase: number): Promise<string> => {
       const response = await request(app.getHttpServer())
@@ -118,17 +118,10 @@ describe('Redis down (e2e) — scenario 10: transition semantics survive losing 
 
   it('20 identical concurrent requests still write exactly one log', async () => {
     const results = await Promise.all(
-      Array.from({ length: 20 }, () =>
-        request(app.getHttpServer())
-          .post('/locations')
-          .send({ userId: 'u-rd-race', lng: 136, lat: 1 }),
-      ),
+      Array.from({ length: 20 }, () => report('u-rd-race', 136, 1)),
     );
-    for (const response of results) {
-      expect(response.status).toBe(201);
-    }
     const entered = results
-      .map((r) => (r.body as Envelope<ReportResponse>).data.enteredAreaIds.length)
+      .map((result) => result.enteredAreaIds.length)
       .reduce((sum, n) => sum + n, 0);
     expect(entered).toBe(1);
     expect(await logsFor('u-rd-race')).toHaveLength(1);

@@ -7,6 +7,7 @@ import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 
 import { AppModule } from '@app/app.module';
+import { LocationsService } from '@app/locations/locations.service';
 
 config();
 
@@ -48,14 +49,11 @@ describe('Presence cache (e2e)', () => {
   let dataSource: DataSource;
   let redis: Redis;
   let areaId: string;
+  let locationsService: LocationsService;
 
-  const report = async (userId: string, lng: number, lat: number): Promise<ReportResponse> => {
-    const response = await request(app.getHttpServer())
-      .post('/locations')
-      .send({ userId, lng, lat })
-      .expect(201);
-    return (response.body as Envelope<ReportResponse>).data;
-  };
+  // Service-level since N4B (ADR 0015): POST /locations publishes instead of processing.
+  const report = (userId: string, lng: number, lat: number): Promise<ReportResponse> =>
+    locationsService.report({ userId, lng, lat });
 
   const logCount = async (userId: string): Promise<number> => {
     const rows = await dataSource.query<Array<{ n: string }>>(
@@ -73,6 +71,7 @@ describe('Presence cache (e2e)', () => {
     app = moduleFixture.createNestApplication();
     await app.init();
     dataSource = app.get(DataSource);
+    locationsService = app.get(LocationsService);
     redis = new Redis({
       host: process.env.REDIS_HOST,
       port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
