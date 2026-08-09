@@ -127,6 +127,19 @@ Not scope decisions but facts surfaced by the ADR 0007 measurement
   assumption (README) and defends the edges it can see (accuracy gate, dedup).
   A fixed-timer client silently multiplies event volume without adding
   information; nothing server-side can fully compensate.
+- **Centrally defined areas** — the in-memory polygon model's load-bearing
+  assumption: areas come from `POST /areas`, an operations task, not a user
+  action. That single fact is what makes the model possible — polygon count is
+  independent of user count, so ten users and ten million users load the same
+  few hundred shapes. If areas ever became user-drawn, polygon count would
+  scale with users and the memory model collapses. The fix is not a bigger
+  cache — it is a different partitioning dimension: geographic partitioning,
+  each worker holding only the polygons for its region. That is a redesign, not
+  a tuning change, because it conflicts with the `hash(userId)` partitioning
+  the whole ordering guarantee rests on (decision 21): a user crossing a
+  regional boundary would have to change partition, and that breaks per-user
+  sequential processing at exactly the moment it matters most — a boundary
+  crossing is precisely when an ENTER/EXIT decision is in flight.
 
 ## Deferred optimisations — decided against for now, with revisit conditions
 
@@ -149,6 +162,17 @@ Status after ADR 0011 (the target architecture) reshuffled this list:
 - **Geohash-based fast paths** (pre-filtering candidate areas by cell):
   deferred until the in-memory polygon set is measurably too large for brute
   R-tree/linear checks — at current area counts it is noise.
+- **Prepared polygon snapshot**: today each instance queries Postgres at
+  startup and builds its own spatial index — at a few hundred areas that costs
+  a few hundred KB and a couple hundred milliseconds, and per-instance
+  duplication is irrelevant since each process has its own memory. Around tens
+  of thousands of polygons, startup parsing becomes seconds and the footprint
+  becomes worth counting — mattering most during deployment and partition
+  rebalance, when many workers start at once. The fix, deliberately not built:
+  a prepared, versioned snapshot artifact that workers load rather than each
+  parsing source data independently. The constraint is startup cost and parse
+  work, not query speed — the R-tree stays logarithmic and is not the problem
+  at any of these sizes.
 - **Kafka migration**: the initial broker choice serves 256 partitions fine;
   reopens if partition count, retention, or consumer-group semantics outgrow
   it. A broker swap behind the worker interface is the designed-for case.
