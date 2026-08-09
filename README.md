@@ -99,10 +99,19 @@ original Redis-as-truth design).
 3. Departed areas are deleted (no exit log — a declared non-goal); state and log
    commit atomically or not at all.
 
-Point-in-polygon runs in PostGIS (`ST_Covers`, GIST-indexed — the boundary line
-counts as inside, [ADR 0003](docs/ADR/0003-spatial-query-strategy.md)); polygons are
-validated structurally at the DTO layer and geometrically with `ST_IsValid` before
-any row is stored, plus a database `CHECK` constraint as backstop.
+**Point-in-polygon runs in memory since Phase N2** ([ADR 0012](docs/ADR/0012-in-memory-spatial-index.md)):
+each instance holds every polygon in an rbush-indexed snapshot loaded from
+Postgres at startup and answers "which areas cover this point" without touching
+the database — reproducing `ST_Covers` semantics exactly (the boundary line
+counts as inside, [ADR 0003](docs/ADR/0003-spatial-query-strategy.md); proven by
+an equivalence harness that runs ~840 boundary-hostile points through both
+engines and is kept as a permanent test). A singleton `area_version` counter is
+bumped in the same transaction as every `POST /areas`; the creating instance
+refreshes its snapshot before responding, other instances poll every 30 s.
+PostGIS remains the source of truth for geometry: polygons are validated
+structurally at the DTO layer and geometrically with `ST_IsValid` before any row
+is stored, plus a database `CHECK` constraint as backstop, and the GIST index
+stays for the validator-side query.
 
 How the presence read is executed, and what was measured to decide it, lives in the
 load section below — the short version is that three implementations were built,
@@ -199,18 +208,28 @@ Nothing here was added because it sounded fast. What was tried:
 - **Pool enlargement** — rejected on measurement: demand ≈ 6.4 of 10 connections,
   mostly idle-in-transaction; more connections change nothing while Node is the
   wall. [ADR 0009](docs/ADR/0009-connection-and-query-bounds.md)
+- **In-memory spatial index (Phase N2)** — built after its equivalence proof
+  (zero mismatches vs `ST_Covers` over ~840 boundary-hostile probes), measured
+  with same-session ABBA bracketing after run-to-run machine drift (±15–20%)
+  was caught inflating single comparisons: **+6–24% on the no-change workload,
+  positive in all eight adjacent comparisons; no attributable effect on
+  transitions** (they are dominated by the write transaction). The stub's
+  +43–50% projection was an upper bound and behaved like one. Costs priced:
+  8 ms startup at 2 areas, 192 ms and ~49 MB per instance at 10k areas.
+  [ADR 0012](docs/ADR/0012-in-memory-spatial-index.md)
 
 ### Two optimisations that were deferred — and how each resolved
 
 Both were recorded as decisions with revisit conditions; the target architecture
 resolved both:
 
-- **Polygon caching** — the revisit condition *fired*. The pre-registered
-  experiment (stub the spatial query, re-run the harness) measured the round
-  trip's removal at **+43–50%** (1,986 → 2,835 req/s static at c=500, ADR 0003
-  annotations), so the in-memory versioned polygon snapshot is now **phase N2**
-  of the target architecture, with area-version invalidation answering the
-  multi-instance question.
+- **Polygon caching** — the revisit condition *fired*, and the resolution is now
+  **built**: the pre-registered stub experiment priced the round trip's removal
+  at +43–50% (ADR 0003 annotations), phase N2 then delivered the in-memory
+  versioned snapshot and collected **+6–24% on the static workload** under
+  stricter ABBA bracketing — the optimisation record entry above has the honest
+  comparison, [ADR 0012](docs/ADR/0012-in-memory-spatial-index.md) the full
+  matrix.
 - **Collapsing the request into one round trip** — *dissolved rather than
   built*: the worker model removes the per-ping round trips wholesale, which is
   what the PL/pgSQL fold was for. The analysis stays in git history; no revisit
@@ -354,6 +373,7 @@ Required variables have no fallback — the app refuses to start if one is missi
 | `POSTGRES_ACQUIRE_TIMEOUT_MS` | no | `2000`    | Pool-acquire bound; must be < statement timeout (ADR 0009) |
 | `POSTGRES_STATEMENT_TIMEOUT_MS` | no | `5000`  | Server-side statement ceiling; must be < idle-txn timeout (ADR 0009) |
 | `POSTGRES_IDLE_TXN_TIMEOUT_MS` | no | `10000`  | Kills transactions left idle by a hung app side (ADR 0009) |
+| `AREAS_POLL_INTERVAL_MS` | no | `30000`  | How often each instance polls `area_version` for polygon changes made by other instances; the creating instance refreshes immediately (ADR 0012) |
 
 The three timeouts are ordering-validated at boot — a misordered combination refuses
 to start. The migration CLI deliberately carries none of these bounds.

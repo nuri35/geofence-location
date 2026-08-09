@@ -16,6 +16,7 @@ import { CreateLockedPresenceReadFunction1786118827443 } from '../src/migrations
 import { CreateLogsRecordedIdIndex1786128051611 } from '../src/migrations/1786128051611-CreateLogsRecordedIdIndex';
 import { CreateUserEventState1786247465996 } from '../src/migrations/1786247465996-CreateUserEventState';
 import { RenameLogsObservedAtToCapturedAt1786247467078 } from '../src/migrations/1786247467078-RenameLogsObservedAtToCapturedAt';
+import { CreateAreaVersion1786250194892 } from '../src/migrations/1786250194892-CreateAreaVersion';
 import { E2E_DATABASE_NAME } from './e2e-constants';
 
 // Migrations are imported explicitly (no glob: transform contexts resolve globs
@@ -33,6 +34,7 @@ const MIGRATIONS = [
   CreateLogsRecordedIdIndex1786128051611,
   CreateUserEventState1786247465996,
   RenameLogsObservedAtToCapturedAt1786247467078,
+  CreateAreaVersion1786250194892,
 ];
 
 const provisionE2eDatabase = async (): Promise<void> => {

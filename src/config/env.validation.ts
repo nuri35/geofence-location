@@ -2,6 +2,7 @@ import * as Joi from 'joi';
 
 import {
   DEFAULT_ACQUIRE_TIMEOUT_MS,
+  DEFAULT_AREAS_POLL_INTERVAL_MS,
   DEFAULT_IDLE_TXN_TIMEOUT_MS,
   DEFAULT_POOL_SIZE,
   DEFAULT_STATEMENT_TIMEOUT_MS,
@@ -32,6 +33,10 @@ export const envValidationSchema = Joi.object({
     .integer()
     .min(100)
     .default(DEFAULT_IDLE_TXN_TIMEOUT_MS),
+  [EnvKey.AreasPollIntervalMs]: Joi.number()
+    .integer()
+    .min(250)
+    .default(DEFAULT_AREAS_POLL_INTERVAL_MS),
 }).custom((env: Record<string, unknown>) => {
   // ADR 0009: acquire < statement < idle-in-transaction. Waiting longer for a
   // connection than the bound on what holds connections just grows the queue, and a

@@ -158,3 +158,21 @@ build when that day comes, and what it costs.
 > semantics that the in-memory implementation must reproduce. Invalidation is
 > version-bump + publish, with periodic version polling as the self-healing
 > path. Nothing here is contradicted; the "until" clause resolved.
+
+> **Fifth annotation (2026-08-09, Phase N2) — built, proven, measured; this
+> ADR's open condition is now closed.** The in-memory index exists
+> ([ADR 0012](0012-in-memory-spatial-index.md)): rbush bbox prefilter + turf
+> exact containment, loaded from Postgres, versioned via an `area_version`
+> singleton, polled every 30 s. The precondition this ADR set — reproduce
+> `ST_Covers` boundary semantics — was proven before the switch: ~840
+> boundary-hostile probe points through both engines, **zero mismatches**
+> (`test/spatial-equivalence.e2e-spec.ts`, kept as the permanent tripwire).
+> Measured under ABBA same-session bracketing: **+6–24% on the static
+> workload, positive in all eight adjacent comparisons; no attributable
+> effect on transitions** — the stub's +43–50% was an upper bound and behaved
+> like one (its transition gain was session noise; ADR 0012 has the full
+> matrix and the costs the stub couldn't show: 192 ms startup and ~49 MB per
+> instance at 10k areas). PostGIS keeps everything this ADR actually decided:
+> source of truth, `ST_IsValid` gate, CHECK constraint, GIST index; the
+> per-request query alone left the hot path, surviving as
+> `findCoveringAreaIdsViaPostgis` — the reference arm of the harness.

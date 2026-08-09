@@ -39,6 +39,7 @@ Start with the lookup table in [.claude/README.md](.claude/README.md)
 | --- | --- |
 | Touch presence, transition, or logging logic | [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md) |
 | Write or tune a spatial query | [ADR 0003](docs/ADR/0003-spatial-query-strategy.md) + `.claude/skills/postgis-spatial` |
+| Touch the in-memory spatial index, snapshot polling, or `area_version` | [ADR 0012](docs/ADR/0012-in-memory-spatial-index.md) |
 | Add async infrastructure (queue, worker) | [ADR 0004](docs/ADR/0004-no-queue.md) |
 | Touch timestamps, ordering, or `observed_at` | [ADR 0005](docs/ADR/0005-time-and-ordering-policy.md) |
 | Design or change a read endpoint's paging or filters | [ADR 0006](docs/ADR/0006-read-endpoint-pagination.md) |
@@ -74,6 +75,7 @@ Numbered, append-only. One or two sentences here; the reasoning lives in the ADR
 22. Workers hold the polygons in memory as a versioned snapshot and do point-in-polygon there, reproducing `ST_Covers` boundary semantics; PostGIS remains source of truth and the `POST /areas` validator. Invalidation = version bump + publish, with periodic version polling as self-healing. — [ADR 0011](docs/ADR/0011-partitioned-async-architecture.md)
 23. The no-change fast exit carries the design: ~99% of events acknowledge without touching any database; only a membership change produces an ENTER/EXIT event and one Postgres transaction (advisory lock kept, presence re-verified under it, `ON CONFLICT` arbiter), acknowledged only AFTER commit so worker death means clean redelivery. Postgres write volume scales with changes, not events. — [ADR 0011](docs/ADR/0011-partitioned-async-architecture.md)
 24. In the target, previous membership resolves Redis → Postgres lazily, read OUTSIDE the lock — with mandatory authoritative re-verification under the lock on the change path (the verify-on-hit ADR 0007 required). Worker-local presence state is deliberately deferred (restart loss, rebalance split-brain); Redis is never the source of truth. — [ADR 0011](docs/ADR/0011-partitioned-async-architecture.md)
+25. Point-in-polygon runs in the app tier (N2): an in-memory snapshot (rbush prefilter + turf containment, `ignoreBoundary: false`) proven equivalent to `ST_Covers` on ~840 boundary-hostile probes with zero mismatches (`test/spatial-equivalence.e2e-spec.ts`, the permanent tripwire). A singleton `area_version` row is bumped in the same transaction as the area insert; `POST /areas` refreshes the creating instance synchronously, other instances poll every 30 s (`AREAS_POLL_INTERVAL_MS`); rebuilds are serialized and swapped as one reference; a runtime rebuild failure serves stale and retries, a bootstrap failure aborts boot. PostGIS keeps truth, `ST_IsValid`, the CHECK constraint, and the GIST index. Measured (ABBA, same session): +6–24% static, no attributable transition effect. — [ADR 0012](docs/ADR/0012-in-memory-spatial-index.md)
 
 ## Hard constraints
 
@@ -109,7 +111,7 @@ New-architecture phases ([ADR 0011](docs/ADR/0011-partitioned-async-architecture
 | Phase | Scope | Status |
 | --- | --- | --- |
 | N1 | Adaptive payload contract: `deviceId`/`seq` dedup, `capturedAt`, `accuracy` gate — system stays synchronous | Complete — [ADR 0010](docs/ADR/0010-adaptive-payload-contract.md) |
-| N2 | In-memory versioned polygon snapshot + area-version invalidation (measured upper bound +43–50%, ADR 0003 annotations) | Not started |
+| N2 | In-memory versioned polygon snapshot + area-version invalidation (measured upper bound +43–50%, ADR 0003 annotations) | Complete — equivalence proven (zero mismatches over ~840 probes), +6–24% static under ABBA bracketing (the stub's number was an upper bound; transition effect not attributable), costs priced at 10k areas (192 ms startup, ~49 MB/instance) — [ADR 0012](docs/ADR/0012-in-memory-spatial-index.md) |
 | N3 | Redis as lazy presence resolver (read outside the lock; change-path re-verification under it) | Not started |
 | N4 | Partitioned queue (256, `hash(userId)`) + workers absorb the transition path; API goes 202/stateless; dedup state leaves the hot path | Not started |
 | N5 | Partition ownership, rebalancing, and worker parallelism hardening | Not started |

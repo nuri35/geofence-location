@@ -10,6 +10,7 @@ import { HealthModule } from '@app/health/health.module';
 import { LocationsModule } from '@app/locations/locations.module';
 import { LogsModule } from '@app/logs/logs.module';
 import { appConfig } from '@config/app.config';
+import { areasConfig } from '@config/areas.config';
 import { databaseConfig } from '@config/database.config';
 import { envValidationSchema } from '@config/env.validation';
 import { typeOrmModuleFactory } from '@config/typeorm.config';
@@ -18,7 +19,7 @@ import { typeOrmModuleFactory } from '@config/typeorm.config';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig],
+      load: [appConfig, areasConfig, databaseConfig],
       validationSchema: envValidationSchema,
       validationOptions: {
         abortEarly: true,

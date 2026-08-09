@@ -21,6 +21,7 @@ was built. Five minutes, then start working.
 | Touch anything spatial: geometry columns, SRIDs, spatial queries, GIST indexes, geo validation | `skills/postgis-spatial` |
 | Create, edit, run, or revert a migration; change schema | `skills/typeorm-migrations` |
 | Write tests, run suites, or declare a change "green" | `skills/testing-verification` |
+| Touch the in-memory spatial index, snapshot rebuild/polling, or `area_version` | `docs/ADR/0012-in-memory-spatial-index.md` + the equivalence harness `test/spatial-equivalence.e2e-spec.ts` |
 | Commit | Run the green chain (or the `verifier` agent) first. The full chain is defined in `skills/testing-verification`. |
 
 Claude Code loads skill descriptions automatically and should reach for these on
