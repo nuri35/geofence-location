@@ -14,7 +14,11 @@ in ordering or state decisions at all.
 
 - **`recorded_at`** — assigned server-side at receipt — is authoritative for
   **both ordering and the logged time**. Processing order is server arrival
-  order. All timestamps are `timestamptz`.
+  order. All timestamps are `timestamptz`. *(Since N4 "receipt" means the
+  API's `receivedAt` stamp, carried in the queue message and written verbatim
+  by the worker — under backlog the log records when the system accepted the
+  event, never when a worker reached it. ADR 0015/0016; proven under a forced
+  backlog in `test/worker-resilience.e2e-spec.ts`.)*
 - **`observed_at`** — client-reported, nullable — is stored for informational
   purposes only and **participates in no logic**: no rejection, no comparison,
   no state. It is context for a human reading the data, nothing more.

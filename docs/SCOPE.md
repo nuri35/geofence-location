@@ -95,12 +95,14 @@ log corruption, since extra inside-samples cause no transitions. Load
 measurement added a data point: `/health` costs a real DB ping per call and
 plateaus at ~1k req/s on the reference box — an unauthenticated amplification
 target that a token bucket should also cover. The fix is a per-user bucket at
-the stateless API of the target architecture (its natural home once ADR 0011's
-Redis returns to the stack, or at the gateway). Still deferred with the rest of
-the abuse surface, behind the missing authentication — but note the async
-design *raises* the stakes: an abusive client fills queue partitions instead of
-merely burning CPU, so N4 should not ship without at least a per-user publish
-budget.
+the stateless API (Redis is back in the stack since N3 and is its natural
+home, or at the gateway). Still deferred with the rest of the abuse surface,
+behind the missing authentication — and an honest correction of this file's
+own earlier sentence: it said "N4 should not ship without at least a per-user
+publish budget", and **N4 shipped without one**. The exposure is now real and
+queue-shaped: an abusive client fills its hash partitions (delaying every user
+sharing them) instead of merely burning CPU. Recorded as an open liability of
+the async system, first in line behind authentication.
 
 ## Observations from load testing — known and unaddressed
 
@@ -110,9 +112,13 @@ Not scope decisions but facts surfaced by the ADR 0007 measurement
 - **Multi-second transaction stalls** (1.5–4.8 s max transaction age) recur in
   write-heavy load under every read strategy — strategy-independent, enough to
   destroy any run's p99. Checkpoint logs look healthy; WSL2/Docker WAL-fsync
-  latency spikes are the prime suspect. Unaddressed because diagnosis needs
-  config changes (`log_min_duration_statement`, possibly `statement_timeout`)
-  that were out of bounds during measurement; both are Phase 4 items.
+  latency spikes are the prime suspect. *Partially resolved since*: Phase 4B
+  landed the bounds (ADR 0009 — the 5 s statement ceiling caps how long any
+  stall can hold a connection), and the async pipeline moved these
+  transactions off the request path entirely, so a stall now delays one
+  partition's lane instead of a client. The DIAGNOSIS (why WSL fsync spikes)
+  was never done and remains unowned — it will resurface in N6's numbers if
+  the environment still has it.
 - **`/health` performs a real database ping per call** (it also pinged Redis
   until the cache removal), unauthenticated, plateauing at ~1k req/s on the
   reference box — an amplification target. Unaddressed because rate limiting as
@@ -152,10 +158,13 @@ Status after ADR 0011 (the target architecture) reshuffled this list:
   rather than deferred*: the worker model of ADR 0011 removes the per-ping
   round trips wholesale, which is what this fold was for. No revisit condition
   remains; git history keeps the analysis.
-- **Worker-local presence state** — deferred out of the target's first version:
-  fastest and most fragile (restart loses it; a partition rebalance can leave
-  two workers with different pictures of one user). Reopens when rebalance
-  fencing exists and the Redis hop on the 99% path is a measured cost.
+- **Worker-local presence state** — *resolved by decision, then built* (N5B,
+  ADR 0018). The original rejection rested on rebalance split-brain; static
+  partition ownership (ADR 0016) removed that mechanism without waiting for
+  rebalance fencing — exclusive ownership is a decision about the deployment
+  layer, not an omission. The residue moved, not vanished: when N5-final makes
+  ownership dynamic, partition movement MUST invalidate the moving users'
+  memory, and that obligation is recorded in ADR 0018.
 - **Business-event publication** (ENTER/EXIT as consumable events for other
   systems): deferred until a second consumer exists — publishing to nobody is
   surface without a customer.

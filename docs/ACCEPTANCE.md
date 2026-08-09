@@ -16,8 +16,12 @@ observable state throughout; scenario 13 asserts the response body itself.
 > `LocationsService.report()` the N4C worker mounts — against the real database,
 > cache and advisory lock. HTTP-layer scenarios (validation, the accuracy gate)
 > remain at HTTP; the 202 publish contract is pinned by
-> `test/locations-publish.e2e-spec.ts`. N4D re-points the transition scenarios
-> at the full async path (publish → worker → logs).
+> `test/locations-publish.e2e-spec.ts`. The full async path (publish → worker →
+> logs) is covered by the `worker-loop`, `worker-resilience`,
+> `worker-parallelism`, and `worker-presence-memory` e2e specs for the loop,
+> exactly-once-under-kill, ordering, backlog timestamps, and presence-memory
+> properties; re-pointing the numbered scenarios themselves at that path
+> remains open (deferred from N4D-short, owed alongside N6).
 
 ## Scenario → test map
 

@@ -14,17 +14,27 @@ TypeScript 5.9 strict (verified via `npm ls` and tsconfig).
 src/config/     the ONLY place allowed to read process.env (see below)
 src/common/     cross-cutting: filters/, interceptors/, decorators/, dto/ — each with an index.ts barrel
 src/health/     GET /health (Terminus) — pattern for a feature module: *.module.ts + *.controller.ts + *.constants.ts
+src/areas/      areas + the in-memory spatial index/snapshot (ADR 0012)
+src/locations/  ingest (publisher) + the parked transition service (ADR 0015/0016)
+src/logs/       GET /logs keyset pagination
+src/presence/   presence entity, Redis cache, worker memory, /metrics counters
+src/redis/      the REDIS_CLIENT wrapper module (removed after ADR 0007, back since ADR 0013)
+src/mq/         AMQP publisher (confirms; never declares topology — ADR 0014/0015)
+src/worker/     the worker process' consumer (per-user chains — ADR 0016/0017)
 src/migrations/ TypeORM migrations (see typeorm-migrations skill)
 ```
 
+Two entrypoints, one repo: `src/main.ts` (HTTP API) and `src/worker-main.ts`
+(application context, no HTTP) — `WorkerModule` composes its own imports and is
+the ONLY module allowed to provide `PresenceMemoryService` (ADR 0018).
+
 Feature modules own their constants file (`health.constants.ts`,
-`areas.constants.ts`, `locations.constants.ts`). No magic strings: string-y
-identifiers live in enums or exported constants — existing ones are
-`ConfigNamespace`, `EnvKey`, `NodeEnvironment` (src/config/config.constants.ts),
-`SWAGGER_PATH` (src/main.ts), `HEALTH_INDICATOR_DATABASE`, and
-`SKIP_RESPONSE_TRANSFORM_KEY`. (A `src/redis/` module with a `REDIS_CLIENT`
-Symbol existed as the external-client wrapper pattern until the presence cache
-was removed — ADR 0007; see git history if that pattern is needed again.)
+`areas.constants.ts`, `locations.constants.ts`, `mq.constants.ts`,
+`worker.constants.ts`). No magic strings: string-y identifiers live in enums or
+exported constants — existing ones are `ConfigNamespace`, `EnvKey`,
+`NodeEnvironment` (src/config/config.constants.ts), `SWAGGER_PATH`
+(src/main.ts), `HEALTH_INDICATOR_DATABASE`, `SKIP_RESPONSE_TRANSFORM_KEY`,
+`REDIS_CLIENT`, `MQ_EXCHANGE`, and `PARTITION_QUEUE_PREFIX`.
 
 ## The config rule (enforced by convention — check it in review)
 

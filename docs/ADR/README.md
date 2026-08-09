@@ -12,7 +12,7 @@
 | [0008](0008-disable-migration-generate.md) | Disable `migration:generate`; schema SQL is written by hand | Accepted | 2026-08-08 |
 | [0009](0009-connection-and-query-bounds.md) | Bound connection acquisition, statement execution, and idle transactions | Accepted | 2026-08-08 |
 | [0010](0010-adaptive-payload-contract.md) | Adaptive payload contract with per-device deduplication | Accepted | 2026-08-09 |
-| [0011](0011-partitioned-async-architecture.md) | Partitioned asynchronous architecture (target; phases N2–N6) | Accepted as direction | 2026-08-09 |
+| [0011](0011-partitioned-async-architecture.md) | Partitioned asynchronous architecture | Accepted — built through N5B (as-built deltas recorded in its header) | 2026-08-09 |
 | [0012](0012-in-memory-spatial-index.md) | In-memory spatial index with versioned snapshot (Phase N2) | Accepted | 2026-08-09 |
 | [0013](0013-presence-cache-no-change-fast-path.md) | Redis presence cache with a no-change fast path (Phase N3) | Accepted | 2026-08-09 |
 | [0014](0014-rabbitmq-topology.md) | RabbitMQ topology with consistent-hash partitioning (Phase N4A) | Accepted | 2026-08-09 |

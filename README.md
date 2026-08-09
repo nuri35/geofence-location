@@ -11,23 +11,29 @@
 ![Tests](https://img.shields.io/badge/tests-161%20passing%20(88%20unit%20%2B%2073%20e2e)-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-A geofencing API built on NestJS + PostgreSQL/PostGIS. Users report coordinates
-(`POST /locations`); when a user **enters** a predefined geographic area, exactly one
-event is logged with user, area, and timestamp — under high concurrent load, without
-duplicates. Areas are managed as GeoJSON polygons (`POST /areas`, `GET /areas`); the
-entry log is queryable via `GET /logs` (keyset-paginated). How the system behaves
-under load — the case's central requirement — is answered in
+A geofencing system built on NestJS + RabbitMQ + PostgreSQL/PostGIS + Redis.
+Users report coordinates (`POST /locations` → **202, queued, processed
+asynchronously by a partitioned worker**); when a user **enters** a predefined
+geographic area, exactly one event is logged with user, area, and timestamp —
+under high concurrent load, without duplicates, in per-user order. Areas are
+managed as GeoJSON polygons (`POST /areas`, `GET /areas`); the entry log is
+queryable via `GET /logs` (keyset-paginated, eventually consistent with
+accepted events). The last measured load numbers — and what the async pipeline
+still owes measurement — are in
 [one place below](#under-load--concurrency-capacity-degradation).
 
 Decisions and project state live in [CLAUDE.md](CLAUDE.md); reasoning lives in
 [docs/ADR/](docs/ADR/README.md); working conventions live in [.claude/](.claude/README.md).
 
-## The target architecture — where this is heading
+## The architecture — as built
 
-> **None of this section is built yet.** It is the recorded direction
-> ([ADR 0011](docs/ADR/0011-partitioned-async-architecture.md)), being built in
-> phases N2–N6; everything after this section describes the synchronous system
-> that exists and runs today.
+> **This is the system that runs** (ADR 0011, built through N5B across ADRs
+> 0012–0018; the N6 load measurement is the remaining item). Readers of the old
+> "target" diagram will recognise the shape — what changed is inside the worker
+> box and the arrows to the stores: presence is worker memory backed by
+> Postgres (never Redis on a cold read), dedup is worker memory over a
+> read-only table, and area invalidation is version polling, with no publish
+> channel.
 
 ```
   mobile client — adaptive sending: ≥10 s since last send, ≥50 m moved, usable accuracy
@@ -41,12 +47,17 @@ Decisions and project state live in [CLAUDE.md](CLAUDE.md); reasoning lives in
   partitioned queue — FIXED 256 partitions, key = hash(userId)
         │              same user → same partition → per-user order preserved
         ▼
-  worker — owns SEVERAL partitions (worker count independent of partition count)
+  worker — owns SEVERAL partitions (worker count independent of partition count;
+        │    static assignment via WORKER_PARTITIONS until rebalancing lands)
         │    one user's events in order; different users in parallel
+        │    (per-user promise chains; prefetch is a budget, not an ordering guard)
         │
-        │  1. dedup (deviceId, seq)
+        │  1. dedup (deviceId, seq) — in-memory Map, lazily seeded from the
+        │     read-only user_event_state table; bumped only after success
         │  2. point-in-polygon from IN-MEMORY versioned polygon snapshot
-        │  3. previous membership: Redis → Postgres, lazily
+        │     (refreshed by polling area_version every 30 s — no publish channel)
+        │  3. previous membership: WORKER MEMORY → Postgres on a cold user
+        │     (never Redis — a stale key must not enter a store with no TTL)
         ▼
   ┌─────────────────────  AREA CHANGED?  ─────────────────────┐
   │                                                           │
@@ -59,14 +70,18 @@ Decisions and project state live in [CLAUDE.md](CLAUDE.md); reasoning lives in
                                           ON CONFLICT arbiter,│
                                           presence + log      │
                                           ▼                   │
+                                          update worker memory│
+                                          DEL the Redis key   │
+                                          (never SET),        │
                                           ack AFTER commit    │
                                           (worker dies ⇒      │
                                            redelivery, clean) │
   └───────────────────────────────────────────────────────────┘
 
-  POST /areas ──► Postgres (source of truth + ST_IsValid) ──► bump area version
-                 ──► publish invalidation ──► workers reload snapshot
-                     (periodic version polling self-heals a missed notification)
+  POST /areas ──► Postgres (source of truth + ST_IsValid) ──► bump area_version
+                 ──► every process polls the version every 30 s and reloads
+                     its snapshot (the creating API instance reloads at once;
+                     a publish channel was deliberately not built — ADR 0012)
 ```
 
 **Why this shape.** Each layer scales with a different thing: the API with
@@ -83,14 +98,16 @@ unchanged inside the 1% path, because a rebalance window can briefly hand one
 partition to two workers and the message layer's ordering promise is not a
 correctness foundation.
 
-## Architecture as built today — the five-minute version
+## The transition path — the five-minute version
 
 **Entry is a transition, not a state.** A user sitting inside an area for ten minutes
-must produce one log, not sixty — so every location report is compared against where
+must produce one log, not sixty — so every location event is compared against where
 the user *was*, and only the difference is logged. A user can be inside several
 overlapping areas; the transition is a set difference (entered = current \ previous),
 which also makes a first-ever report from inside an area count as an entry with no
-special case.
+special case. Since N4 this comparison happens **in the worker**, asynchronously —
+the API only validates, stamps `receivedAt`, and publishes; the sections below
+describe the transition path where it now runs.
 
 **Previous membership lives in PostgreSQL** (`user_area_presence`, composite primary
 key `(user_id, area_id)`) — not in a cache — because the state must never disagree
@@ -100,10 +117,13 @@ read-modify-write, and on multi-instance races (all four failure modes are recor
 [ADR 0002](docs/ADR/0002-presence-table-source-of-truth.md), which rejected the
 original Redis-as-truth design).
 
-**Concurrency is made safe by three layers in one transaction** per location report:
+**Concurrency is made safe by three layers in one transaction** per membership
+change (partitioning already serializes a user's events; the lock stays because
+the database, not the message layer, is the final arbiter — ADR 0011):
 
 1. `pg_advisory_xact_lock(hashtext(user_id))` — first statement; serializes
-   same-user requests (mobile retries make these a certainty), releases at commit.
+   same-user writes (redeliveries and rebalance windows make these possible),
+   releases at commit.
 2. `INSERT … ON CONFLICT (user_id, area_id) DO NOTHING RETURNING` — a log row is
    written **only** when the insert returns a row, so of two racing identical
    requests exactly one logs, enforced by the database, not application state.
@@ -111,9 +131,11 @@ original Redis-as-truth design).
    commit atomically or not at all.
 
 **Point-in-polygon runs in memory since Phase N2** ([ADR 0012](docs/ADR/0012-in-memory-spatial-index.md)):
-each instance holds every polygon in an rbush-indexed snapshot loaded from
-Postgres at startup and answers "which areas cover this point" without touching
-the database — reproducing `ST_Covers` semantics exactly (the boundary line
+each process — the worker, where events are evaluated, and the API, which keeps
+a snapshot for `POST /areas`' immediate refresh and the parked service path —
+holds every polygon in an rbush-indexed snapshot loaded from Postgres at
+startup and answers "which areas cover this point" without touching the
+database — reproducing `ST_Covers` semantics exactly (the boundary line
 counts as inside, [ADR 0003](docs/ADR/0003-spatial-query-strategy.md); proven by
 an equivalence harness that runs ~840 boundary-hostile points through both
 engines and is kept as a permanent test). A singleton `area_version` counter is
@@ -136,22 +158,22 @@ structurally gone from the hot path: the writer and the reader are the same
 process, so there is no invalidation to lose. Redis remains the cache for the
 API-side parked path below, which keeps the ADR 0013 shape until it is deleted.
 
-**The ~99% no-change request touches no database at all since Phase N3**
-([ADR 0013](docs/ADR/0013-presence-cache-no-change-fast-path.md)): previous
-membership is read from a Redis cache **without the lock and without a
-transaction**; if nothing changed, the request is acknowledged right there —
-point-in-polygon in memory (N2), presence from Redis, zero Postgres. Only a
+**The ~99% no-change event opens no transaction and takes no lock** — the fork
+that carries the design ([ADR 0013](docs/ADR/0013-presence-cache-no-change-fast-path.md)
+established the fast path; [ADR 0018](docs/ADR/0018-worker-local-presence.md)
+moved its presence read into worker memory): if the computed membership equals
+the remembered one, the event is acknowledged with nothing touched. Only a
 membership change opens the transaction, where presence is **re-read
 authoritatively under the advisory lock** and the diff recomputed before any
-write — the cache answers "do I need to write?", Postgres always answers "what
-do I write?". Keys are DELed after commit (never updated) and every cached value
-carries a TTL that bounds the one dangerous staleness direction; that exposure
-was deliberately provoked and measured, not argued
-(`test/stale-presence.e2e-spec.ts`). Correctness never depends on Redis: with
-the container stopped, every path falls through to Postgres and the full
-acceptance suite stays green (scenario 10, un-retired). The history of how the
-presence read got here — including the first cache that was built, measured,
-and removed — lives in the load section below.
+write — every hint (memory, cache, whatever) answers "do I need to write?";
+Postgres alone answers "what do I write?". Correctness never depends on Redis:
+with the container stopped, every path falls through to Postgres and the suite
+stays green (scenario 10, un-retired). The stale-cache exposure this design
+once carried was provoked, measured, bounded (`test/stale-presence.e2e-spec.ts`),
+and then structurally removed from the hot path by N5B; it persists only on the
+parked API-side service path, which keeps the ADR 0013 TTLs and counters until
+it is deleted. The full history — including the first cache that was built,
+measured, and removed — lives in the load section below.
 
 ## Under load — concurrency, capacity, degradation
 
@@ -159,9 +181,13 @@ The case requires the system to "perform well under load and be capable of handl
 large number of concurrent requests." That sentence contains two different problems —
 being *correct* when requests race, and having *capacity* when they pile up — plus a
 third the requirement implies: degrading in a bounded way when capacity runs out.
-This section answers all three, with numbers, **for the synchronous system as built
-today** — these measurements are the baseline the target architecture (above) starts
-from, and they remain the honest description of what currently runs. Every number
+This section answers all three, with numbers, **for the pre-queue synchronous
+system** — the last load measurement taken (Phase N3). Since N4 the request path
+is asynchronous and **unmeasured**: these figures are the baseline the async
+pipeline must beat when N6 runs the harness against it, not a description of
+what currently runs. The correctness results transfer (the same transaction,
+lock, and arbiter now execute in the worker); the throughput numbers do not,
+in either direction, until measured. Every number
 below was measured on one development box (Windows/WSL2 Docker, generator + app +
 Postgres co-located, same-host database, warm connection pool) via closed-loop load
 against the real production artifact — 10,000 distinct users, four concurrency

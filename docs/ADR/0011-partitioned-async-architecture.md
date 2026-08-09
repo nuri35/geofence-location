@@ -1,7 +1,34 @@
-# ADR 0011 — Partitioned asynchronous architecture (target; not yet built)
+# ADR 0011 — Partitioned asynchronous architecture
 
-- **Status**: Accepted as direction — nothing below exists yet; phases N2–N6 build it
+- **Status**: Accepted — **built through N5B** (phases N2–N5B; N6 measurement pending). The original status line said "nothing below exists yet"; that stopped being true one phase at a time, and this header was the last to notice.
 - **Date**: 2026-08-09
+
+> **As-built resolution (2026-08-09, after N5B).** The architecture below was
+> built with three deliberate deltas, each decided in its own ADR rather than
+> discovered:
+>
+> 1. **Worker presence is process memory, not Redis-lazy.** The worker reads
+>    memory → Postgres; cold reads never touch Redis
+>    ([ADR 0018](0018-worker-local-presence.md)). The "worker-local presence
+>    rejected for v1" alternative below was un-rejected by static partition
+>    ownership ([ADR 0016](0016-worker.md)) — exclusive ownership removed the
+>    split-brain that justified the rejection; the rebalance-fencing caveat now
+>    lives with N5-final's rebalancing work.
+> 2. **Area invalidation is version polling only.** The "publish an
+>    invalidation" channel was never built — N2 chose the 30 s poll as the
+>    whole mechanism, not the self-healing backup
+>    ([ADR 0012](0012-in-memory-spatial-index.md)); pub/sub remains unbuilt and
+>    unneeded at current staleness budgets.
+> 3. **Dedup state lives in worker memory over a read-only table** — the
+>    per-event write is gone as promised, but the checkpoint writes this ADR's
+>    consequences section anticipates are N5-final work, not built
+>    ([ADR 0016](0016-worker.md)/[0017](0017-per-user-parallelism.md)).
+>
+> Everything else stands as designed: 202/stateless API with publisher
+> confirms ([ADR 0015](0015-publisher-contract.md)), fixed 256 partitions keyed
+> `hash(userId)` ([ADR 0014](0014-rabbitmq-topology.md)), ack-after-commit,
+> advisory lock + `ON CONFLICT` under the ~1% change path, `receivedAt` as
+> `recorded_at`. The text below is preserved as the design record.
 
 ## Context — a scope change, not a correction
 

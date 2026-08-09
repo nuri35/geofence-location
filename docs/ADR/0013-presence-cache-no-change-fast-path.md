@@ -34,7 +34,7 @@ construction. The mechanics:
 3. **Invalidate (DEL) after commit, never update-in-place**; the change path DELs
    even when the authoritative recompute wrote nothing, healing stale-"changed"
    keys. Lazy rebuild only — no bulk load after a Redis restart, ever.
-4. **Every populate carries a TTL** (`PRESENCE_CACHE_TTL_S`, default 300 s): the
+4. **Every populate carries a TTL** (originally one knob, `PRESENCE_CACHE_TTL_S` 300 s; split by the addendum below into `PRESENCE_CACHE_TTL_NONEMPTY_S` 15 s / `PRESENCE_CACHE_TTL_EMPTY_S` 300 s): the
    bound on both ways a key can stay stale (below). This is the machinery ADR
    0007 said the rejected cache lacked, now cheap because it protects a fast path
    instead of sitting under a lock.

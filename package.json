@@ -1,7 +1,7 @@
 {
   "name": "geofence-location",
   "version": "0.1.0",
-  "description": "NestJS + PostGIS geofence location service skeleton",
+  "description": "Geofencing system: stateless NestJS API publishing to a partitioned RabbitMQ topology; worker processes transitions against PostGIS with in-memory polygons and presence",
   "private": true,
   "license": "MIT",
   "scripts": {
