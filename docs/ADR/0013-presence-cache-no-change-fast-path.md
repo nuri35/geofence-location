@@ -220,6 +220,18 @@ entry was never durably captured anywhere. Once events land in the partitioned
 queue before processing, a suspected stale window becomes **replayable**; the
 counters above then tell an operator *when* to replay.
 
+## Resolution (2026-08-09, Phase N5B — [ADR 0018](0018-worker-local-presence.md))
+
+The stale-"unchanged" hazard this ADR documented, provoked, bounded, and
+counted is now **structurally gone from the hot path**: in the worker, presence
+lives in process memory — the writer and the reader are the same process, so
+there is no invalidation to lose — and cold reads seed from Postgres, never
+Redis, so a stale key cannot enter a store without a TTL. Redis's presence
+role narrows to the parked API-side path (which keeps this ADR's shape, TTL
+and counters unchanged until it is deleted) and to receiving post-commit DELs
+so no future reader ever finds a stale key. The differentiated TTLs, the two
+counters, and the provocation spec remain in force for that remaining surface.
+
 ## Alternatives considered
 
 - **Consulting dedup state on the fast path** (a Postgres or Redis read) —

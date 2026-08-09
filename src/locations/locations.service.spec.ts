@@ -4,6 +4,7 @@ import { EntityManager } from 'typeorm';
 
 import { AreasService } from '@app/areas/areas.service';
 import { PresenceCacheService } from '@app/presence/presence-cache.service';
+import { PresenceMemoryService } from '@app/presence/presence-memory.service';
 import { PresenceMetricsService } from '@app/presence/presence-metrics.service';
 
 import { LocationsService } from './locations.service';
@@ -339,6 +340,76 @@ describe('LocationsService', () => {
           sql.includes('user_event_state'),
         ),
       ).toHaveLength(0);
+    });
+  });
+
+  describe('worker-local presence memory (N5B, ADR 0018) — provided only in the worker', () => {
+    const memory = { get: jest.fn(), set: jest.fn() };
+    let workerService: LocationsService;
+
+    beforeEach(async () => {
+      memory.get.mockReset();
+      memory.set.mockReset();
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          LocationsService,
+          { provide: AreasService, useValue: { findCoveringAreaIds } },
+          { provide: PresenceCacheService, useValue: cache },
+          { provide: PresenceMetricsService, useValue: metrics },
+          { provide: PresenceMemoryService, useValue: memory },
+          { provide: getDataSourceToken(), useValue: dataSourceMock },
+        ],
+      }).compile();
+      workerService = module.get(LocationsService);
+    });
+
+    it('warm memory + no change: touches NOTHING — no Redis, no Postgres, no transaction', async () => {
+      findCoveringAreaIds.mockResolvedValue(['a']);
+      memory.get.mockReturnValue(['a']);
+
+      const result = await workerService.report(baseDto);
+
+      expect(result).toEqual({ enteredAreaIds: [], duplicate: false });
+      expect(cache.get).not.toHaveBeenCalled();
+      expect(dataSourceQuery).not.toHaveBeenCalled();
+      expect(transaction).not.toHaveBeenCalled();
+      expect(memory.set).not.toHaveBeenCalled(); // value unchanged, nothing to write
+    });
+
+    it('cold memory: seeds from POSTGRES, never Redis (the restart-poisoning decision)', async () => {
+      findCoveringAreaIds.mockResolvedValue(['a']);
+      memory.get.mockReturnValue(undefined);
+      primeUnlockedRead(['a']);
+
+      await workerService.report(baseDto);
+
+      expect(cache.get).not.toHaveBeenCalled(); // Redis is not in the worker's read path
+      const [sql] = dataSourceQuery.mock.calls[0] as [string];
+      expect(sql).toContain('user_area_presence');
+      expect(memory.set).toHaveBeenCalledWith('user-1', ['a']); // seeded from truth
+    });
+
+    it('a committed transition updates memory with the post-commit set and still DELs Redis', async () => {
+      findCoveringAreaIds.mockResolvedValue(['aaa']);
+      memory.get.mockReturnValue([]);
+      primeQueries([], { aaa: true });
+
+      await workerService.report(baseDto);
+
+      expect(memory.set).toHaveBeenCalledWith('user-1', ['aaa']); // memory = new truth
+      expect(cache.invalidate).toHaveBeenCalledWith('user-1'); // DEL, never SET
+      expect(cache.populate).not.toHaveBeenCalled();
+    });
+
+    it('a dedup duplicate wrote nothing, so memory is not rewritten', async () => {
+      findCoveringAreaIds.mockResolvedValue(['aaa']);
+      memory.get.mockReturnValue([]);
+      primeQueries([], { aaa: true }, 5); // last processed seq == incoming seq -> duplicate
+
+      const result = await workerService.report({ ...baseDto, deviceId: 'phone-1', seq: 5 });
+
+      expect(result.duplicate).toBe(true);
+      expect(memory.set).not.toHaveBeenCalled();
     });
   });
 

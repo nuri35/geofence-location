@@ -26,6 +26,7 @@ was built. Five minutes, then start working.
 | Touch the queue topology, partitions, or `infra/rabbitmq/` | `docs/ADR/0014-rabbitmq-topology.md` — the app NEVER declares topology; the partition count is effectively immutable |
 | Touch publishing, the 202 contract, or the location event schema | `docs/ADR/0015-publisher-contract.md` — the message is v1 and consumers depend on it; change it only with a version bump |
 | Touch the worker, partition ownership, dedup, or ack/nack behaviour | `docs/ADR/0016-worker.md` — ack only after commit; the FK-drop catch stays NARROW — plus `docs/ADR/0017-per-user-parallelism.md`: per-user chains own ordering; no await between a shared-state read and its dependent write |
+| Touch presence memory, or anything that moves a partition between workers | `docs/ADR/0018-worker-local-presence.md` — memory is worker-only, seeded from Postgres only; rebalancing MUST invalidate it |
 | Commit | Run the green chain (or the `verifier` agent) first. The full chain is defined in `skills/testing-verification`. |
 
 Claude Code loads skill descriptions automatically and should reach for these on

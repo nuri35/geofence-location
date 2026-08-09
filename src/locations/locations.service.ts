@@ -1,10 +1,12 @@
-import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import { Injectable, Optional, UnprocessableEntityException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { AreasService } from '@app/areas/areas.service';
 import { LOGS_TABLE } from '@app/logs/entities/log.entity';
 import { PresenceCacheService } from '@app/presence/presence-cache.service';
+import { PresenceCacheRead } from '@app/presence/presence-cache.service';
+import { PresenceMemoryService } from '@app/presence/presence-memory.service';
 import { PresenceMetricsService } from '@app/presence/presence-metrics.service';
 import { PRESENCE_TABLE } from '@app/presence/entities/presence.entity';
 
@@ -27,6 +29,10 @@ export class LocationsService {
     private readonly presenceCache: PresenceCacheService,
     private readonly presenceMetrics: PresenceMetricsService,
     @InjectDataSource() private readonly dataSource: DataSource,
+    // Present ONLY in the worker (N5B, ADR 0018): with static partition ownership
+    // the worker remembers presence locally. Absent in the API process by design —
+    // multi-instance API memory would be split-brain (ADR 0011).
+    @Optional() private readonly presenceMemory?: PresenceMemoryService,
   ) {}
 
   /**
@@ -67,19 +73,36 @@ export class LocationsService {
     // [1] Pure in-memory read (ADR 0012) — no database.
     const currentAreaIds = await this.areasService.findCoveringAreaIds(dto.lng, dto.lat);
 
-    // [2] Previous membership HINT: cache first, read OUTSIDE any lock (ADR 0013).
-    // A Redis error is not a miss — both fall through to Postgres, but only a clean
-    // miss may write back (an error could resurrect what an invalidation removed).
-    const cacheRead = await this.presenceCache.get(dto.userId);
-    const previousHint =
-      cacheRead.status === 'hit' ? cacheRead.areaIds : await this.readPresenceUnlocked(dto.userId);
+    // [2] Previous membership HINT, read OUTSIDE any lock. In the WORKER (memory
+    // present, ADR 0018): memory first; a cold user goes straight to Postgres —
+    // NEVER Redis, so a stale key can't be copied into a Map that has no TTL
+    // (the restart-after-failed-DEL case, closed by decision). In the API-parked
+    // path (memory absent): the ADR 0013 shape unchanged — cache, then Postgres;
+    // a Redis error is not a miss, and only a clean miss may write back.
+    let cacheRead: PresenceCacheRead | null = null;
+    let previousHint: string[];
+    const remembered = this.presenceMemory?.get(dto.userId);
+    if (remembered !== undefined) {
+      previousHint = remembered;
+    } else if (this.presenceMemory !== undefined) {
+      previousHint = await this.readPresenceUnlocked(dto.userId);
+      // Seeding from truth is safe even if this event later nacks: nothing has
+      // been committed, so the pre-state IS the correct memory content.
+      this.presenceMemory.set(dto.userId, previousHint);
+    } else {
+      cacheRead = await this.presenceCache.get(dto.userId);
+      previousHint =
+        cacheRead.status === 'hit'
+          ? cacheRead.areaIds
+          : await this.readPresenceUnlocked(dto.userId);
+    }
 
     // [3] The fork that carries the design (ADR 0011/0013): no apparent change →
     // acknowledge without a transaction, a lock, or a single write. Dedup state is
     // deliberately not consulted here — a no-change duplicate is absorbed by the
     // transition model itself; dedup remains authoritative on every WRITING path.
     if (!this.differs(currentAreaIds, previousHint)) {
-      if (cacheRead.status === 'miss') {
+      if (cacheRead?.status === 'miss') {
         await this.presenceCache.populate(dto.userId, previousHint);
       }
       return { enteredAreaIds: [], duplicate: false };
@@ -163,6 +186,15 @@ export class LocationsService {
       this.presenceMetrics.recordChangePathNoop();
     }
 
+    // [4b] N5B: the writer and the reader are the same process — update memory
+    // directly with the post-commit state (under the advisory lock, presence now
+    // equals currentAreaIds exactly). Synchronous set, no await between commit
+    // and memory (ADR 0017's rule); same-user serialization is the worker chain.
+    // A dedup-duplicate wrote nothing, so memory stays as it was.
+    if (!result.duplicate) {
+      this.presenceMemory?.set(dto.userId, currentAreaIds);
+    }
+
     // [5] Invalidate AFTER commit, never update-in-place (ADR 0013). Runs on every
     // change-path exit including "authoritative said no change" — a stale-"changed"
     // key heals here instead of wasting a transaction per event until the TTL.
@@ -171,7 +203,11 @@ export class LocationsService {
     // outage (GET also failing) is the safe case — reads fall through to Postgres.
     const invalidated = await this.presenceCache.invalidate(dto.userId);
     if (!invalidated) {
-      this.presenceMetrics.recordInvalidateFailure(cacheRead.status !== 'error');
+      // In the worker path no GET was made (memory/Postgres served the hint) —
+      // classify as gets-failing, the safe direction, rather than guessing.
+      this.presenceMetrics.recordInvalidateFailure(
+        cacheRead !== null && cacheRead.status !== 'error',
+      );
     }
 
     return result;

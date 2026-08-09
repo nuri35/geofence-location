@@ -19,3 +19,4 @@
 | [0015](0015-publisher-contract.md) | The API becomes a publisher: 202 contract and the location event schema (Phase N4B) | Accepted | 2026-08-09 |
 | [0016](0016-worker.md) | The worker: static partition ownership, lazy dedup, ack-after-commit (Phase N4C) | Accepted | 2026-08-09 |
 | [0017](0017-per-user-parallelism.md) | Per-user parallelism inside a partition (Phase N5A) | Accepted | 2026-08-09 |
+| [0018](0018-worker-local-presence.md) | Worker-local presence state (Phase N5B) | Accepted | 2026-08-09 |

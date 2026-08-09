@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AreasModule } from '@app/areas/areas.module';
 import { LocationsService } from '@app/locations/locations.service';
+import { PresenceMemoryService } from '@app/presence/presence-memory.service';
 import { PresenceModule } from '@app/presence/presence.module';
 import { RedisModule } from '@app/redis/redis.module';
 import { appConfig } from '@config/app.config';
@@ -42,6 +43,9 @@ import { WorkerConsumerService } from './worker-consumer.service';
     AreasModule,
     PresenceModule,
   ],
-  providers: [LocationsService, WorkerConsumerService],
+  // PresenceMemoryService is provided HERE and nowhere else (ADR 0018): only the
+  // worker may hold per-user presence memory — the API is multi-instance and a
+  // memory there would be split-brain. LocationsService takes it @Optional().
+  providers: [LocationsService, WorkerConsumerService, PresenceMemoryService],
 })
 export class WorkerModule {}

@@ -124,6 +124,18 @@ structurally at the DTO layer and geometrically with `ST_IsValid` before any row
 is stored, plus a database `CHECK` constraint as backstop, and the GIST index
 stays for the validator-side query.
 
+**Presence reads are layered since N5B** ([ADR 0018](docs/ADR/0018-worker-local-presence.md)) —
+this is now the shape of the system. In the worker, where every event is
+processed: **process memory first** (the same user always lands on the same
+worker, so the worker just remembers — a Map lookup, no network), and on a cold
+user **Postgres directly** — deliberately never Redis, so a stale key can never
+be copied into a store without a TTL. A committed transition updates memory
+synchronously and **DELETEs** the Redis key (never SETs — two SETs can land out
+of order; a DEL cannot). The stale-cache hazard ADR 0013 documented is thereby
+structurally gone from the hot path: the writer and the reader are the same
+process, so there is no invalidation to lose. Redis remains the cache for the
+API-side parked path below, which keeps the ADR 0013 shape until it is deleted.
+
 **The ~99% no-change request touches no database at all since Phase N3**
 ([ADR 0013](docs/ADR/0013-presence-cache-no-change-fast-path.md)): previous
 membership is read from a Redis cache **without the lock and without a
