@@ -137,7 +137,14 @@ describe('Logs (e2e) — keyset pagination invariants', () => {
     expect(firstPage.nextCursor).not.toBeNull();
 
     // A newer row lands after page 1 was read — ahead of the cursor position.
-    await insertLog('mid-flight', areaA, '2026-08-07 11:59:59.000001+00');
+    // The table is SHARED and other suites' rows are newer than this spec's
+    // seeds, so "ahead of the cursor" must mean newer than the global maximum
+    // at walk time, not newer than our own seeds (a fixed 2026-08-07 timestamp
+    // here broke order-dependently once the N3 suites landed).
+    await dataSource.query(
+      "INSERT INTO logs (user_id, area_id, recorded_at) VALUES ($1, $2, now() + interval '1 hour')",
+      ['mid-flight', areaA],
+    );
 
     const rest: LogItem[] = [];
     let cursor = firstPage.nextCursor;

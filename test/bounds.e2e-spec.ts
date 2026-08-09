@@ -34,6 +34,19 @@ describe('Connection and query bounds (e2e, ADR 0009)', () => {
   });
 
   it('a held advisory lock turns into a 503 with Retry-After after the statement ceiling, leaking nothing', async () => {
+    // Since ADR 0013 a request only reaches the advisory lock when a membership
+    // diff exists — seed a presence row so the report at (0,0) is a departure.
+    // Coordinate claim: bounds uses lng 46..48 for this throwaway area.
+    const areaRows = await dataSource.query<Array<{ id: string }>>(
+      `INSERT INTO areas (name, boundary)
+       VALUES ('bounds-area', ST_GeomFromText('POLYGON((46 0, 48 0, 48 2, 46 2, 46 0))', 4326))
+       RETURNING id`,
+    );
+    await dataSource.query(
+      'INSERT INTO user_area_presence (user_id, area_id, entered_at, last_seen_at) VALUES ($1, $2, now(), now())',
+      ['bounds-lock-u', areaRows[0].id],
+    );
+
     const holder: QueryRunner = dataSource.createQueryRunner();
     await holder.connect();
     await holder.startTransaction();

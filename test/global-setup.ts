@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from 'dotenv';
+import Redis from 'ioredis';
 import { Client } from 'pg';
 import { DataSource } from 'typeorm';
 
@@ -37,8 +38,35 @@ const MIGRATIONS = [
   CreateAreaVersion1786250194892,
 ];
 
+/**
+ * The Postgres e2e database is dropped and recreated per run, but Redis is shared
+ * and persistent — presence keys from a previous run would gate this run's fast
+ * path against area ids that no longer exist (ADR 0013). The cache is disposable
+ * by design, so flush it; best-effort, because the suite must also run (and one
+ * spec deliberately runs) with Redis unreachable.
+ */
+const flushRedis = async (): Promise<void> => {
+  const redis = new Redis({
+    host: requireEnv(EnvKey.RedisHost),
+    port: parseInt(requireEnv(EnvKey.RedisPort), 10),
+    connectTimeout: 1000,
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+    lazyConnect: true,
+  });
+  try {
+    await redis.connect();
+    await redis.flushdb();
+  } catch {
+    // Redis down: nothing to flush; the app degrades to Postgres reads by design.
+  } finally {
+    redis.disconnect();
+  }
+};
+
 const provisionE2eDatabase = async (): Promise<void> => {
   config();
+  await flushRedis();
 
   const admin = new Client({
     host: requireEnv(EnvKey.PostgresHost),

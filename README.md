@@ -113,9 +113,22 @@ structurally at the DTO layer and geometrically with `ST_IsValid` before any row
 is stored, plus a database `CHECK` constraint as backstop, and the GIST index
 stays for the validator-side query.
 
-How the presence read is executed, and what was measured to decide it, lives in the
-load section below — the short version is that three implementations were built,
-raced, and the winner (`folded`, one round trip) kept.
+**The ~99% no-change request touches no database at all since Phase N3**
+([ADR 0013](docs/ADR/0013-presence-cache-no-change-fast-path.md)): previous
+membership is read from a Redis cache **without the lock and without a
+transaction**; if nothing changed, the request is acknowledged right there —
+point-in-polygon in memory (N2), presence from Redis, zero Postgres. Only a
+membership change opens the transaction, where presence is **re-read
+authoritatively under the advisory lock** and the diff recomputed before any
+write — the cache answers "do I need to write?", Postgres always answers "what
+do I write?". Keys are DELed after commit (never updated) and every cached value
+carries a TTL that bounds the one dangerous staleness direction; that exposure
+was deliberately provoked and measured, not argued
+(`test/stale-presence.e2e-spec.ts`). Correctness never depends on Redis: with
+the container stopped, every path falls through to Postgres and the full
+acceptance suite stays green (scenario 10, un-retired). The history of how the
+presence read got here — including the first cache that was built, measured,
+and removed — lives in the load section below.
 
 ## Under load — concurrency, capacity, degradation
 
@@ -217,6 +230,16 @@ Nothing here was added because it sounded fast. What was tried:
   +43–50% projection was an upper bound and behaved like one. Costs priced:
   8 ms startup at 2 areas, 192 ms and ~49 MB per instance at 10k areas.
   [ADR 0012](docs/ADR/0012-in-memory-spatial-index.md)
+- **Redis presence cache, second attempt (Phase N3)** — the first attempt lost
+  under cache-under-lock and was removed (above); moved OUTSIDE the lock with a
+  no-change fast path that skips the transaction entirely, it won decisively
+  where it matters: **static +56–104% under ABBA bracketing (≈2.9k → ≈5.1k
+  req/s, Postgres untouched — the request is HTTP + one Redis GET, at the
+  measured bare-route Node ceiling)**; transition −8 to −28%, the cache's
+  worst-case workload, accepted deliberately for the ~99% no-change traffic
+  shape. The stale-key suppression ADR 0007 identified is now bounded by a TTL
+  and was provoked in a test rather than reasoned away.
+  [ADR 0013](docs/ADR/0013-presence-cache-no-change-fast-path.md)
 
 ### Two optimisations that were deferred — and how each resolved
 
@@ -374,6 +397,10 @@ Required variables have no fallback — the app refuses to start if one is missi
 | `POSTGRES_STATEMENT_TIMEOUT_MS` | no | `5000`  | Server-side statement ceiling; must be < idle-txn timeout (ADR 0009) |
 | `POSTGRES_IDLE_TXN_TIMEOUT_MS` | no | `10000`  | Kills transactions left idle by a hung app side (ADR 0009) |
 | `AREAS_POLL_INTERVAL_MS` | no | `30000`  | How often each instance polls `area_version` for polygon changes made by other instances; the creating instance refreshes immediately (ADR 0012) |
+| `REDIS_HOST`        | yes      | —             | Redis host (presence cache — ADR 0013). Correctness survives the server being DOWN; the coordinates are still never guessed |
+| `REDIS_PORT`        | yes      | —             | Redis port (also used by compose mapping) |
+| `REDIS_PASSWORD`    | no       | *(empty)*     | Redis AUTH password; empty = no auth (compose default) |
+| `PRESENCE_CACHE_TTL_S` | no    | `300`         | Staleness bound on cached presence; worst-case entry suppression after a failed invalidation (ADR 0013) |
 
 The three timeouts are ordering-validated at boot — a misordered combination refuses
 to start. The migration CLI deliberately carries none of these bounds.

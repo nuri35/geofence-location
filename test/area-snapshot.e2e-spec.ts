@@ -1,6 +1,6 @@
-// Poll interval for THIS spec's app instance only (each e2e spec file boots its own
-// process and its own AppModule) — must be set before the module compiles, same
-// pattern as setup-env.ts. Joi floor is 250 ms.
+// Poll interval for THIS spec's app instance only — set before the module compiles,
+// restored in afterAll (spec files share a worker process). Joi floor is 250 ms.
+const savedPollInterval = process.env.AREAS_POLL_INTERVAL_MS;
 process.env.AREAS_POLL_INTERVAL_MS = '500';
 
 import { INestApplication } from '@nestjs/common';
@@ -78,6 +78,11 @@ describe('Area snapshot lifecycle (e2e)', () => {
 
   afterAll(async () => {
     await app.close();
+    if (savedPollInterval === undefined) {
+      delete process.env.AREAS_POLL_INTERVAL_MS;
+    } else {
+      process.env.AREAS_POLL_INTERVAL_MS = savedPollInterval;
+    }
   });
 
   it('an area created out-of-band is invisible until the poll picks it up, then takes effect', async () => {

@@ -7,7 +7,27 @@ const requiredEnv = {
   [EnvKey.PostgresUser]: 'geofence',
   [EnvKey.PostgresPassword]: 'geofence',
   [EnvKey.PostgresDb]: 'geofence',
+  [EnvKey.RedisHost]: 'localhost',
+  [EnvKey.RedisPort]: 6379,
 };
+
+describe('envValidationSchema — Redis vars (ADR 0013)', () => {
+  it('requires REDIS_HOST and REDIS_PORT — infra coordinates are never guessed', () => {
+    const withoutHost: Record<string, unknown> = { ...requiredEnv };
+    delete withoutHost[EnvKey.RedisHost];
+    expect(envValidationSchema.validate(withoutHost).error?.message).toContain('REDIS_HOST');
+  });
+
+  it('defaults the presence-cache TTL and accepts an explicit override', () => {
+    const defaulted = envValidationSchema.validate(requiredEnv);
+    expect((defaulted.value as Record<string, number>)[EnvKey.PresenceCacheTtlS]).toBe(300);
+    const explicit = envValidationSchema.validate({
+      ...requiredEnv,
+      [EnvKey.PresenceCacheTtlS]: 2,
+    });
+    expect(explicit.error).toBeUndefined();
+  });
+});
 
 describe('envValidationSchema — ADR 0009 timeout ordering', () => {
   it('accepts the defaults (acquire 2s < statement 5s < idle-txn 10s)', () => {

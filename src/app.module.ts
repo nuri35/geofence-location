@@ -9,9 +9,11 @@ import { ResponseTransformInterceptor } from '@app/common/interceptors';
 import { HealthModule } from '@app/health/health.module';
 import { LocationsModule } from '@app/locations/locations.module';
 import { LogsModule } from '@app/logs/logs.module';
+import { RedisModule } from '@app/redis/redis.module';
 import { appConfig } from '@config/app.config';
 import { areasConfig } from '@config/areas.config';
 import { databaseConfig } from '@config/database.config';
+import { redisConfig } from '@config/redis.config';
 import { envValidationSchema } from '@config/env.validation';
 import { typeOrmModuleFactory } from '@config/typeorm.config';
 
@@ -19,7 +21,7 @@ import { typeOrmModuleFactory } from '@config/typeorm.config';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, areasConfig, databaseConfig],
+      load: [appConfig, areasConfig, databaseConfig, redisConfig],
       validationSchema: envValidationSchema,
       validationOptions: {
         abortEarly: true,
@@ -29,6 +31,7 @@ import { typeOrmModuleFactory } from '@config/typeorm.config';
       inject: [databaseConfig.KEY],
       useFactory: typeOrmModuleFactory,
     }),
+    RedisModule,
     AreasModule,
     LocationsModule,
     LogsModule,

@@ -2,6 +2,7 @@ export enum ConfigNamespace {
   App = 'app',
   Areas = 'areas',
   Database = 'database',
+  Redis = 'redis',
 }
 
 export enum NodeEnvironment {
@@ -23,6 +24,10 @@ export enum EnvKey {
   PostgresStatementTimeoutMs = 'POSTGRES_STATEMENT_TIMEOUT_MS',
   PostgresIdleTxnTimeoutMs = 'POSTGRES_IDLE_TXN_TIMEOUT_MS',
   AreasPollIntervalMs = 'AREAS_POLL_INTERVAL_MS',
+  RedisHost = 'REDIS_HOST',
+  RedisPort = 'REDIS_PORT',
+  RedisPassword = 'REDIS_PASSWORD',
+  PresenceCacheTtlS = 'PRESENCE_CACHE_TTL_S',
 }
 
 /**
@@ -39,6 +44,15 @@ export const DEFAULT_POOL_SIZE = 10;
  * cross-instance staleness.
  */
 export const DEFAULT_AREAS_POLL_INTERVAL_MS = 30_000;
+
+/**
+ * Upper bound on presence-cache staleness (ADR 0013). Invalidate-after-commit is
+ * the primary mechanism; the TTL is the backstop that bounds the two ways a key
+ * can stay stale (a failed post-commit DEL, and the read-aside race where a miss
+ * populate lands after a concurrent commit's DEL). Worst-case entry suppression
+ * equals this value.
+ */
+export const DEFAULT_PRESENCE_CACHE_TTL_S = 300;
 export const DEFAULT_ACQUIRE_TIMEOUT_MS = 2_000;
 export const DEFAULT_STATEMENT_TIMEOUT_MS = 5_000;
 export const DEFAULT_IDLE_TXN_TIMEOUT_MS = 10_000;

@@ -195,7 +195,7 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
   });
 
   describe('ADR 0010 payload contract', () => {
-    it('acknowledges a repeated seq as a 200 duplicate without reprocessing', async () => {
+    it('stops a replayed seq that would WRITE: 200 duplicate under the lock, nothing stored (ADR 0013 contract)', async () => {
       const first = await request(app.getHttpServer())
         .post('/locations')
         .send({ userId: 'u-dedup', deviceId: 'phone-1', seq: 1, lng: 2, lat: 2 })
@@ -204,16 +204,43 @@ describe('Locations (e2e) — ACCEPTANCE.md scenarios', () => {
         enteredAreaIds: [areaA],
         duplicate: false,
       });
+      await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-dedup', deviceId: 'phone-1', seq: 2, lng: 50, lat: 50 })
+        .expect(201); // exit processed, last_seq = 2
 
-      const repeat = await request(app.getHttpServer())
+      // The replay of seq 1 WOULD produce a re-entry — the change path opens, and
+      // the dedup check under the lock stops it before anything is written.
+      const replay = await request(app.getHttpServer())
         .post('/locations')
         .send({ userId: 'u-dedup', deviceId: 'phone-1', seq: 1, lng: 2, lat: 2 })
         .expect(200);
-      expect((repeat.body as Envelope<ReportResponse>).data).toMatchObject({
+      expect((replay.body as Envelope<ReportResponse>).data).toMatchObject({
         enteredAreaIds: [],
         duplicate: true,
       });
       expect(await logsFor('u-dedup')).toHaveLength(1);
+      expect(await presenceFor('u-dedup')).toHaveLength(0);
+    });
+
+    it('absorbs a NO-CHANGE duplicate on the fast path without the duplicate label (ADR 0013)', async () => {
+      await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-dedup-noop', deviceId: 'phone-1', seq: 5, lng: 2, lat: 2 })
+        .expect(201);
+
+      // Same seq, same position: no membership change, so the fast path returns
+      // without consulting dedup state — the duplicate is absorbed by the
+      // transition model itself (201, duplicate: false), and nothing is written.
+      const repeat = await request(app.getHttpServer())
+        .post('/locations')
+        .send({ userId: 'u-dedup-noop', deviceId: 'phone-1', seq: 5, lng: 2, lat: 2 })
+        .expect(201);
+      expect((repeat.body as Envelope<ReportResponse>).data).toMatchObject({
+        enteredAreaIds: [],
+        duplicate: false,
+      });
+      expect(await logsFor('u-dedup-noop')).toHaveLength(1);
     });
 
     it('processes a newer seq normally', async () => {

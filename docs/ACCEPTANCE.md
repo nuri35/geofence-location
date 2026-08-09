@@ -17,7 +17,7 @@ observable state throughout; scenario 13 asserts the response body itself.
 | --- | --- |
 | 1–8 | `test/locations.e2e-spec.ts` — test names carry the scenario number verbatim (e.g. "4. logs a second entry after exit and re-entry"; 8 is the 20-way concurrent race) |
 | 9 | `test/locations.e2e-spec.ts` — "9. persists capturedAt verbatim without letting it affect the outcome" (includes the deprecated observedAt alias) |
-| 10 | Retired (see the scenario) — was verified while the cache existed: container stopped, 24 tests green, recorded in the Phase 3 trail; the cache and its spec were removed by ADR 0007 |
+| 10 | **Un-retired at Phase N3** — `test/redis-down.e2e-spec.ts` boots the app against a dead Redis port and proves entry/dwell/exit-reenter/overlap/concurrency semantics unchanged; additionally verified with the container genuinely stopped (`docker stop geofence-redis`, 65 tests green, N3 trail) |
 | 11 | `test/areas.e2e-spec.ts` — "11. rejects a self-intersecting bowtie…" + "11. rejects an unclosed ring…" (test titles carry the scenario number) |
 | 12 | `test/locations.e2e-spec.ts` — "12. rejects out-of-range coordinates and oversized userId with 400"; `test/areas.e2e-spec.ts` — "12. rejects out-of-range coordinates with 400" |
 | 13 | `test/locations.e2e-spec.ts` — "13. returns 201 naming exactly the areas entered, then an empty array" |
@@ -96,15 +96,22 @@ mid-transaction failure rolls back the presence write).
   U's log row carries the supplied `capturedAt` verbatim; V's carries null.
   Both rows' `recorded_at` are server-assigned.
 
-## 10. preserves all transition semantics with Redis unavailable — RETIRED
+## 10. preserves all transition semantics with Redis unavailable
 
-Retired 2026-08-07. This scenario was predicated on the Redis presence cache,
-which was built, measured, and removed (ADR 0007). While the cache existed, the
-scenario was verified for real — container stopped, 24 tests green — and that
-verification is on record in the Phase 3 trail. In the adopted design
-correctness never depends on any store but PostgreSQL (ADR 0002), so the
-scenario's obligation is discharged structurally: there is no Redis to lose.
-Kept under its number so the map below and historical references stay valid.
+*(Retired 2026-08-07 when the first cache was removed with ADR 0007; un-retired
+2026-08-09 when Redis returned as the presence cache behind the no-change fast
+path, ADR 0013.)*
+
+- **Setup**: areas A and B (overlapping); Redis unreachable (dead port or
+  stopped container). The app must boot.
+- **Sequence**: the core transition flows — cross in, dwell, exit and re-enter,
+  overlap entry, 20 identical concurrent requests.
+- **Expected**: identical outcomes to Redis-up operation — every cache read
+  errors and falls through to the unlocked Postgres read; nothing is written
+  back on errors; the change path is untouched. Correctness never depends on
+  any store but PostgreSQL (ADR 0002); losing Redis costs latency only.
+  Proven by `test/redis-down.e2e-spec.ts` and a full-suite run with the
+  container stopped.
 
 ## 11. rejects an invalid polygon with 400 and stores nothing
 

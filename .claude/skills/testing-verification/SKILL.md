@@ -46,7 +46,24 @@ Jest 29 + ts-jest, Supertest 7. Two suites with different trust models.
   cascade area, and `ST_Covers` counts the shared corner. Claimed lng ranges:
   locations.e2e-spec owns 0..15 and 100..102, areas.e2e-spec 0..30, logs
   150..170, spatial-equivalence.e2e-spec 59..81, area-snapshot.e2e-spec
-  105..115 — a new spec takes an unclaimed range and records it here.
+  105..115, presence-cache.e2e-spec 120..130, stale-presence.e2e-spec 131..134,
+  redis-down.e2e-spec 135..145, bounds.e2e-spec 46..48 — a new spec takes an
+  unclaimed range and records it here.
+- **The e2e suite runs serially (`maxWorkers: 1` in jest-e2e.json) since Phase
+  N3.** Two interference classes forced it: spec files sharing a worker leak
+  `process.env` mutations into the next file's app boot (specs that override
+  env restore it in afterAll — keep doing that), and the logs pagination
+  invariants walk the SHARED table, so concurrent suites' inserts land inside
+  the walk. Serial cost measured at ~21 s vs ~16 s parallel; determinism won cheap.
+- **Redis in e2e**: the compose Redis is shared and persistent, so
+  test/global-setup.ts FLUSHDBs it per run (the cache is disposable by design) —
+  without that, stale `presence:*` keys from a previous run gate the fast path
+  against area ids that no longer exist. presence-cache and stale-presence specs
+  REQUIRE a live Redis (they assert keys); redis-down points its own app at a
+  closed port and must stay green with or without the container. For the
+  "container actually stopped" proof: `docker stop geofence-redis`, then
+  `npm run test:e2e -- --testPathIgnorePatterns "presence-cache|stale-presence"`,
+  then `docker start geofence-redis`.
 - **Known once-seen flake (Phase 4A, never reproduced across 4+ runs):** one
   full-suite failure right after that coordinate fix, detail lost. Standing
   suspect is cross-suite parallelism on the shared DB; known mitigation is

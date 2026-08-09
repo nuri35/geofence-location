@@ -17,6 +17,21 @@
 > "verify-on-hit" this ADR said would be required. Numbers, method, and the
 > folded decision for the synchronous system all stand.
 
+> **Resolution (2026-08-09, Phase N3 — [ADR 0013](0013-presence-cache-no-change-fast-path.md)).**
+> The constraint that made the cache lose is gone and the measurement now says
+> the opposite, for the reason this note predicted: read OUTSIDE the lock, the
+> cache no longer adds a hop on top of the lock's round trip — it removes the
+> transaction entirely on the ~99% no-change path. Measured under ABBA
+> bracketing: **static +56–104% (2,9k → ~5,1k req/s, Postgres untouched)**;
+> transition −8 to −28% (the 50%-flip workload is the cache's worst case) —
+> bought deliberately for the real traffic shape. The correctness finding of
+> this ADR remains binding and is now answered with machinery, not hope:
+> verify-under-lock on every write, invalidate-after-commit, and a TTL bounding
+> the stale-"unchanged" suppression this ADR identified — provoked and measured
+> in `test/stale-presence.e2e-spec.ts` (entry lost while stale; recovered by
+> TTL or by any differing sample). The folded function stays as the change
+> path's one-round-trip authoritative read.
+
 ## Context
 
 Every `POST /locations` needs the user's previous membership under the advisory
