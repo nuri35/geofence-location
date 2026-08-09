@@ -27,7 +27,8 @@ export enum EnvKey {
   RedisHost = 'REDIS_HOST',
   RedisPort = 'REDIS_PORT',
   RedisPassword = 'REDIS_PASSWORD',
-  PresenceCacheTtlS = 'PRESENCE_CACHE_TTL_S',
+  PresenceCacheTtlEmptyS = 'PRESENCE_CACHE_TTL_EMPTY_S',
+  PresenceCacheTtlNonEmptyS = 'PRESENCE_CACHE_TTL_NONEMPTY_S',
 }
 
 /**
@@ -46,13 +47,15 @@ export const DEFAULT_POOL_SIZE = 10;
 export const DEFAULT_AREAS_POLL_INTERVAL_MS = 30_000;
 
 /**
- * Upper bound on presence-cache staleness (ADR 0013). Invalidate-after-commit is
- * the primary mechanism; the TTL is the backstop that bounds the two ways a key
- * can stay stale (a failed post-commit DEL, and the read-aside race where a miss
- * populate lands after a concurrent commit's DEL). Worst-case entry suppression
- * equals this value.
+ * Presence-cache staleness bounds, differentiated by value (ADR 0013 addendum).
+ * The danger is asymmetric: a stale NON-EMPTY set is the entry-killer (it can
+ * suppress a re-entry into the same area), so it gets the short clock; a stale
+ * "[]" heals on the next inside ping and can only suppress an exit deletion —
+ * a merged visit, which this system already tolerates by declared non-goal.
+ * Worst-case entry suppression equals the NON-EMPTY value.
  */
-export const DEFAULT_PRESENCE_CACHE_TTL_S = 300;
+export const DEFAULT_PRESENCE_CACHE_TTL_EMPTY_S = 300;
+export const DEFAULT_PRESENCE_CACHE_TTL_NONEMPTY_S = 15;
 export const DEFAULT_ACQUIRE_TIMEOUT_MS = 2_000;
 export const DEFAULT_STATEMENT_TIMEOUT_MS = 5_000;
 export const DEFAULT_IDLE_TXN_TIMEOUT_MS = 10_000;

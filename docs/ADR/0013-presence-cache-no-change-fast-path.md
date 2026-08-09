@@ -136,6 +136,90 @@ single comparisons would have lied in both directions.
 - The exposure analysis: ack-after-commit plus redelivery does not change the
   stale-"unchanged" math; the TTL and differing-sample healing carry over.
 
+## Addendum (2026-08-09, same-day review) — differentiated TTL, counters, and the honest framing
+
+**What this design actually means, stated plainly.** "Postgres authoritative, Redis
+ephemeral" is true but incomplete, and the incompleteness is the whole risk: **a
+stale hit is allowed to suppress the authoritative read.** During the TTL window,
+Redis availability affects correctness — a genuine entry can go unlogged. The
+framing above is not softened by the mitigations; it is bounded by them.
+
+**Differentiated TTL — the asymmetry is the point.** The flat TTL was replaced by
+two clocks: non-empty membership **15 s** (`PRESENCE_CACHE_TTL_NONEMPTY_S`), the
+empty set `"[]"` **300 s** (`PRESENCE_CACHE_TTL_EMPTY_S`), both env-configurable.
+Reasoning: a stale `"[]"` heals on the next inside ping, because a non-empty
+computed set immediately disagrees with it and opens the change path; the only
+thing it can suppress is an exit deletion, whose cost is a merged visit — which
+this system already tolerates by declared non-goal, and which a GPS gap produces
+anyway. A stale **non-empty** value is the entry-killer: all of the fatal
+direction lives there, so that is where the short clock goes. Worst-case entry
+suppression drops 300 s → 15 s. Honest cost: users dwelling inside an area now
+refresh via one unlocked Postgres SELECT every 15 s each — no lock, no
+transaction, no per-event change. Both behaviours are pinned by
+`test/stale-presence.e2e-spec.ts` (a stale non-empty key expires on the short
+clock; a stale `"[]"` heals on the next inside ping and merges visits at worst).
+
+**Two counters** (`GET /metrics` — per-instance, in-memory, reset on restart;
+deliberately not an observability stack):
+
+- `presence_invalidate_failed_gets_ok_total` / `presence_invalidate_failed_gets_failing_total`
+  — failed post-commit DELs, **qualified by whether the same request's GET
+  succeeded**. The distinction is load-bearing: a full outage is the *safe* case
+  (GETs fail too, everything falls through to Postgres correctly); the dangerous
+  signal is the asymmetric flap — DEL failing while GETs still serve.
+- `presence_change_path_noop_total` — transactions the cache hint opened whose
+  authoritative recompute wrote nothing. Every lost visit ends with exactly this
+  event (the exit sample disagrees with the stale key, the change path opens,
+  finds nothing to write, and finally DELs it), so the counter is an **upper
+  bound on suppressed entries per window — not a count of them**: read-aside
+  races and ordinary stale-"changed" hits produce the same signature.
+
+**Rejected directions, recorded because each will be asked again:**
+
+- **Fencing / version tokens: rejected permanently.** In the dangerous case the
+  two inputs to the fast path — computed membership and cached value — are
+  bit-identical to the healthy case. Detection needs a third input, and every
+  candidate shares fate with something: a token in Postgres puts Postgres back on
+  the hot path; a version key in Redis fails in exactly the window the DEL
+  failed. The problem is not representation; it is that the only party who knows
+  about the commit is the store you couldn't reach.
+- **Outbox / transactional invalidation queue: not now.** It converts "stale
+  until TTL" into "stale until Redis recovers plus sweep interval" — but during
+  the flap that caused the failure, the sweeper's DELs are failing too. Its
+  marginal value over a short TTL is narrow. Revisit if the flap counter shows
+  sustained non-zero.
+- **Failing the request when the DEL fails: rejected.** The commit already
+  succeeded; returning 5xx reports a true success as a failure. It also does not
+  close the hole — a process dying between COMMIT and DEL leaves no response to
+  fail.
+- **Double-DEL (delete before commit as well as after): held in reserve.**
+  Exposure would then require both DELs to fail, and the pre-commit failure is
+  knowable *before* committing — turning the loss estimate from a bound into a
+  measurement. One extra DEL per transition (~1% of events). Build it if the
+  counters show real numbers.
+- **Caching only the empty set: open, pending a measurement.** It would make the
+  dangerous direction stop existing (an entry event then always sees a non-empty
+  diff or a miss — Postgres is consulted before anything can be suppressed), at
+  the cost of an unlocked SELECT on every dweller ping. The deciding number, not
+  yet measured: **the share of no-change traffic whose membership is non-empty.**
+  If it is small (commuter-like traffic, mostly outside all areas), the variant
+  keeps nearly all of the fast path's gain and deletes the failure mode; if
+  dwell-heavy, the differentiated TTL is the better trade. Measure it from the
+  counters'/logs' hit shape before N4 freezes the worker's cache policy.
+
+**The acceptability argument, because it is the load-bearing one.** The loss
+requires exit → asymmetric invalidation failure → re-entry into the *same area*
+within the TTL. The population that re-enters a geofence within seconds of
+leaving it is overwhelmingly the boundary-oscillating GPS-jitter case — the same
+events whose semantics were already declared weakest when hysteresis was scoped
+out (SCOPE.md). The residual loss concentrates precisely where the product
+already said precision ends.
+
+**Note for N4:** post-hoc repair is impossible in this design — a suppressed
+entry was never durably captured anywhere. Once events land in the partitioned
+queue before processing, a suspected stale window becomes **replayable**; the
+counters above then tell an operator *when* to replay.
+
 ## Alternatives considered
 
 - **Consulting dedup state on the fast path** (a Postgres or Redis read) —

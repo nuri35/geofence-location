@@ -314,6 +314,7 @@ The API listens on `http://localhost:3000`. Health: `GET /health`. Swagger UI: `
 | `POST /areas` | Create an area from a GeoJSON Polygon (`[lng, lat]` order; ≤1000 vertices; `ST_IsValid`-gated with the reason in the 400) |
 | `GET /areas` | List areas with full GeoJSON geometry, `limit`/`offset` |
 | `GET /logs` | Entry log, newest first, keyset-paginated over `(recorded_at, id)` via an opaque cursor (`nextCursor`, null at the end); optional combinable filters `userId`, `areaId`, `from`/`to` on `recorded_at`; page size 50, max 500 |
+| `GET /metrics` | Internal, per-instance, reset-on-restart counters for the presence-cache staleness exposure (ADR 0013 addendum): failed invalidations qualified by GET health, and hint-opened no-op transactions — the latter is an UPPER BOUND on suppressed entries, not a count |
 
 ## Error contract
 
@@ -400,7 +401,8 @@ Required variables have no fallback — the app refuses to start if one is missi
 | `REDIS_HOST`        | yes      | —             | Redis host (presence cache — ADR 0013). Correctness survives the server being DOWN; the coordinates are still never guessed |
 | `REDIS_PORT`        | yes      | —             | Redis port (also used by compose mapping) |
 | `REDIS_PASSWORD`    | no       | *(empty)*     | Redis AUTH password; empty = no auth (compose default) |
-| `PRESENCE_CACHE_TTL_S` | no    | `300`         | Staleness bound on cached presence; worst-case entry suppression after a failed invalidation (ADR 0013) |
+| `PRESENCE_CACHE_TTL_NONEMPTY_S` | no | `15`     | Staleness bound for cached NON-EMPTY membership — the entry-killing direction; worst-case entry suppression equals this (ADR 0013 addendum) |
+| `PRESENCE_CACHE_TTL_EMPTY_S` | no | `300`       | Staleness bound for the cached empty set `"[]"` — the safe direction: heals on the next inside ping, can only merge visits |
 
 The three timeouts are ordering-validated at boot — a misordered combination refuses
 to start. The migration CLI deliberately carries none of these bounds.

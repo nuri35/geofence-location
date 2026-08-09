@@ -46,31 +46,38 @@ export class PresenceCacheService {
     }
   }
 
+  /**
+   * TTL differs by VALUE (ADR 0013 addendum): a stale non-empty set can suppress a
+   * re-entry (the fatal direction) so it lives on the short clock; a stale "[]" can
+   * only suppress an exit deletion — a merged visit, already tolerated by non-goal —
+   * and heals on the next inside ping, so it may live long.
+   */
   async populate(userId: string, areaIds: string[]): Promise<void> {
+    const ttlS =
+      areaIds.length === 0 ? this.config.presenceTtlEmptyS : this.config.presenceTtlNonEmptyS;
     try {
-      await this.redis.set(
-        this.key(userId),
-        JSON.stringify(areaIds),
-        'EX',
-        this.config.presenceTtlS,
-      );
+      await this.redis.set(this.key(userId), JSON.stringify(areaIds), 'EX', ttlS);
     } catch {
       this.logger.debug(`cache populate skipped for ${userId}: redis unavailable`);
     }
   }
 
   /**
-   * Idempotent; called after every change-path commit. A failed DEL is the start of
-   * a staleness window bounded by the TTL — warn, because entries inside that window
-   * on this key's user are suppressed (ADR 0013 records the exposure).
+   * Idempotent; called after every change-path commit. Returns whether the DEL
+   * actually happened: a failure opens a staleness window bounded by the non-empty
+   * TTL, and the caller counts it QUALIFIED by whether GETs were succeeding — a
+   * failed DEL during a full outage is the safe case (reads fall through too); a
+   * failed DEL while GETs succeed is the flap that can suppress entries.
    */
-  async invalidate(userId: string): Promise<void> {
+  async invalidate(userId: string): Promise<boolean> {
     try {
       await this.redis.del(this.key(userId));
+      return true;
     } catch {
       this.logger.warn(
-        `cache invalidate FAILED for ${userId}: stale window opens, bounded by ttl=${this.config.presenceTtlS}s`,
+        `cache invalidate FAILED for ${userId}: stale window opens, bounded by ttl=${this.config.presenceTtlNonEmptyS}s`,
       );
+      return false;
     }
   }
 

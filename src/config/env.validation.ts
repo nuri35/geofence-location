@@ -5,7 +5,8 @@ import {
   DEFAULT_AREAS_POLL_INTERVAL_MS,
   DEFAULT_IDLE_TXN_TIMEOUT_MS,
   DEFAULT_POOL_SIZE,
-  DEFAULT_PRESENCE_CACHE_TTL_S,
+  DEFAULT_PRESENCE_CACHE_TTL_EMPTY_S,
+  DEFAULT_PRESENCE_CACHE_TTL_NONEMPTY_S,
   DEFAULT_STATEMENT_TIMEOUT_MS,
   EnvKey,
   NodeEnvironment,
@@ -41,7 +42,14 @@ export const envValidationSchema = Joi.object({
   [EnvKey.RedisHost]: Joi.string().required(),
   [EnvKey.RedisPort]: Joi.number().port().required(),
   [EnvKey.RedisPassword]: Joi.string().allow('').default(''),
-  [EnvKey.PresenceCacheTtlS]: Joi.number().integer().min(1).default(DEFAULT_PRESENCE_CACHE_TTL_S),
+  [EnvKey.PresenceCacheTtlEmptyS]: Joi.number()
+    .integer()
+    .min(1)
+    .default(DEFAULT_PRESENCE_CACHE_TTL_EMPTY_S),
+  [EnvKey.PresenceCacheTtlNonEmptyS]: Joi.number()
+    .integer()
+    .min(1)
+    .default(DEFAULT_PRESENCE_CACHE_TTL_NONEMPTY_S),
 }).custom((env: Record<string, unknown>) => {
   // ADR 0009: acquire < statement < idle-in-transaction. Waiting longer for a
   // connection than the bound on what holds connections just grows the queue, and a

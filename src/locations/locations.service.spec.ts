@@ -4,6 +4,7 @@ import { EntityManager } from 'typeorm';
 
 import { AreasService } from '@app/areas/areas.service';
 import { PresenceCacheService } from '@app/presence/presence-cache.service';
+import { PresenceMetricsService } from '@app/presence/presence-metrics.service';
 
 import { LocationsService } from './locations.service';
 
@@ -20,7 +21,11 @@ describe('LocationsService', () => {
   const cache = {
     get: jest.fn(),
     populate: jest.fn().mockResolvedValue(undefined),
-    invalidate: jest.fn().mockResolvedValue(undefined),
+    invalidate: jest.fn().mockResolvedValue(true),
+  };
+  const metrics = {
+    recordInvalidateFailure: jest.fn(),
+    recordChangePathNoop: jest.fn(),
   };
 
   const baseDto = { userId: 'user-1', lat: 41, lng: 29 };
@@ -59,12 +64,13 @@ describe('LocationsService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     cache.populate.mockResolvedValue(undefined);
-    cache.invalidate.mockResolvedValue(undefined);
+    cache.invalidate.mockResolvedValue(true);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LocationsService,
         { provide: AreasService, useValue: { findCoveringAreaIds } },
         { provide: PresenceCacheService, useValue: cache },
+        { provide: PresenceMetricsService, useValue: metrics },
         { provide: getDataSourceToken(), useValue: dataSourceMock },
       ],
     }).compile();
@@ -152,6 +158,45 @@ describe('LocationsService', () => {
       expect(result.enteredAreaIds).toEqual([]);
       // The wasted transaction still heals the key.
       expect(cache.invalidate).toHaveBeenCalledWith('user-1');
+      // …and leaves the trailing fingerprint: the upper-bound counter moves.
+      expect(metrics.recordChangePathNoop).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT count a writing transaction or a duplicate as a no-op', async () => {
+      findCoveringAreaIds.mockResolvedValue(['aaa']);
+      cache.get.mockResolvedValue({ status: 'miss' });
+      primeUnlockedRead([]);
+      primeQueries([], { aaa: true });
+      await service.report(baseDto);
+      expect(metrics.recordChangePathNoop).not.toHaveBeenCalled();
+
+      jest.clearAllMocks();
+      cache.invalidate.mockResolvedValue(true);
+      findCoveringAreaIds.mockResolvedValue(['aaa']);
+      cache.get.mockResolvedValue({ status: 'hit', areaIds: [] });
+      primeQueries([], { aaa: true }, 5); // duplicate seq
+      await service.report({ ...baseDto, deviceId: 'phone-1', seq: 5 });
+      expect(metrics.recordChangePathNoop).not.toHaveBeenCalled();
+    });
+
+    it('counts a failed invalidation qualified by GET health: flap vs outage', async () => {
+      // GET succeeded (hit), DEL failed → the asymmetric flap, the dangerous signal.
+      findCoveringAreaIds.mockResolvedValue(['aaa']);
+      cache.get.mockResolvedValue({ status: 'hit', areaIds: [] });
+      cache.invalidate.mockResolvedValue(false);
+      primeQueries([], { aaa: true });
+      await service.report(baseDto);
+      expect(metrics.recordInvalidateFailure).toHaveBeenCalledWith(true);
+
+      jest.clearAllMocks();
+      // GET also failed (error) → full outage, the safe case.
+      findCoveringAreaIds.mockResolvedValue(['aaa']);
+      cache.get.mockResolvedValue({ status: 'error' });
+      cache.invalidate.mockResolvedValue(false);
+      primeUnlockedRead([]);
+      primeQueries([], { aaa: true });
+      await service.report(baseDto);
+      expect(metrics.recordInvalidateFailure).toHaveBeenCalledWith(false);
     });
 
     it('acquires lock and authoritative membership as the FIRST statement of the transaction', async () => {

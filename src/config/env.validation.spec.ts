@@ -18,12 +18,16 @@ describe('envValidationSchema — Redis vars (ADR 0013)', () => {
     expect(envValidationSchema.validate(withoutHost).error?.message).toContain('REDIS_HOST');
   });
 
-  it('defaults the presence-cache TTL and accepts an explicit override', () => {
+  it('defaults the differentiated presence-cache TTLs and accepts explicit overrides', () => {
     const defaulted = envValidationSchema.validate(requiredEnv);
-    expect((defaulted.value as Record<string, number>)[EnvKey.PresenceCacheTtlS]).toBe(300);
+    const value = defaulted.value as Record<string, number>;
+    // Short clock on the entry-killing direction, long on the safe one (ADR 0013 addendum).
+    expect(value[EnvKey.PresenceCacheTtlNonEmptyS]).toBe(15);
+    expect(value[EnvKey.PresenceCacheTtlEmptyS]).toBe(300);
     const explicit = envValidationSchema.validate({
       ...requiredEnv,
-      [EnvKey.PresenceCacheTtlS]: 2,
+      [EnvKey.PresenceCacheTtlNonEmptyS]: 2,
+      [EnvKey.PresenceCacheTtlEmptyS]: 60,
     });
     expect(explicit.error).toBeUndefined();
   });

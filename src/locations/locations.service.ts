@@ -5,6 +5,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { AreasService } from '@app/areas/areas.service';
 import { LOGS_TABLE } from '@app/logs/entities/log.entity';
 import { PresenceCacheService } from '@app/presence/presence-cache.service';
+import { PresenceMetricsService } from '@app/presence/presence-metrics.service';
 import { PRESENCE_TABLE } from '@app/presence/entities/presence.entity';
 
 import { USER_EVENT_STATE_TABLE } from './entities/user-event-state.entity';
@@ -24,6 +25,7 @@ export class LocationsService {
   constructor(
     private readonly areasService: AreasService,
     private readonly presenceCache: PresenceCacheService,
+    private readonly presenceMetrics: PresenceMetricsService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
@@ -76,6 +78,7 @@ export class LocationsService {
     // [4] Change path — everything below is the unchanged ADR 0002 transaction: the
     // hint got us here, but the diff that feeds writes is recomputed from the locked
     // authoritative read (hard constraint: no store but PostgreSQL decides a write).
+    let wroteAnything = false;
     const result = await this.dataSource.transaction(
       async (manager: EntityManager): Promise<LocationReportResponseDto> => {
         const previousAreaIds = await this.lockAndReadPresence(manager, dto.userId);
@@ -137,14 +140,29 @@ export class LocationsService {
           );
         }
 
+        wroteAnything = enteredAreaIds.length > 0 || departed.length > 0;
         return { enteredAreaIds, duplicate: false };
       },
     );
 
+    // A transaction the hint opened that the authoritative recompute emptied: the
+    // trailing fingerprint of a possibly-suppressed visit (every lost visit ends in
+    // one when its exit sample heals the stale key). UPPER BOUND, not a count —
+    // read-aside races and stale-"changed" hits share the signature (ADR 0013).
+    if (!result.duplicate && !wroteAnything) {
+      this.presenceMetrics.recordChangePathNoop();
+    }
+
     // [5] Invalidate AFTER commit, never update-in-place (ADR 0013). Runs on every
     // change-path exit including "authoritative said no change" — a stale-"changed"
     // key heals here instead of wasting a transaction per event until the TTL.
-    await this.presenceCache.invalidate(dto.userId);
+    // A failed DEL is counted QUALIFIED by whether this request's GET succeeded:
+    // GET-ok + DEL-failed is the asymmetric flap that can suppress entries; a full
+    // outage (GET also failing) is the safe case — reads fall through to Postgres.
+    const invalidated = await this.presenceCache.invalidate(dto.userId);
+    if (!invalidated) {
+      this.presenceMetrics.recordInvalidateFailure(cacheRead.status !== 'error');
+    }
 
     return result;
   }

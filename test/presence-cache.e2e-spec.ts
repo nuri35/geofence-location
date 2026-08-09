@@ -90,7 +90,7 @@ describe('Presence cache (e2e)', () => {
     await app.close();
   });
 
-  it('a miss loads presence from Postgres and populates the key with a TTL', async () => {
+  it('a miss loads presence from Postgres and populates the key on the SHORT clock (non-empty = the fatal direction)', async () => {
     await report('u-cache-miss', 122, 2); // enter: change path ends with DEL
     await report('u-cache-miss', 122, 2); // no-change: miss → unlocked read → populate
 
@@ -98,6 +98,15 @@ describe('Presence cache (e2e)', () => {
     expect(JSON.parse(raw ?? 'null')).toEqual([areaId]);
     const ttl = await redis.ttl('presence:u-cache-miss');
     expect(ttl).toBeGreaterThan(0); // bounded staleness, never a permanent key
+    expect(ttl).toBeLessThanOrEqual(15); // default non-empty TTL (ADR 0013 addendum)
+  });
+
+  it('a cached "[]" lives on the LONG clock — its staleness can only merge visits', async () => {
+    await report('u-cache-ttl-empty', 129, 9); // covered by nothing → "[]" cached
+    expect(await redis.get('presence:u-cache-ttl-empty')).toBe('[]');
+    const ttl = await redis.ttl('presence:u-cache-ttl-empty');
+    expect(ttl).toBeGreaterThan(15); // clearly not the short clock
+    expect(ttl).toBeLessThanOrEqual(300); // default empty TTL
   });
 
   it('a hit answers without touching Postgres — proven by desync, not by spying', async () => {
