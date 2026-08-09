@@ -33,5 +33,47 @@ services:
       timeout: 3s
       retries: 10
 
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: geofence-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-geofence}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-geofence}
+    ports:
+      - '${RABBITMQ_PORT:-5672}:5672'
+      - '${RABBITMQ_MGMT_PORT:-15672}:15672'
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      # Ships with the broker but off by default; the whole partitioning scheme
+      # (ADR 0011/0014) depends on rabbitmq_consistent_hash_exchange.
+      - ./infra/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 5s
+      timeout: 10s
+      retries: 12
+
+  # One-shot topology declarator (ADR 0014): declares the consistent-hash
+  # exchange, partition queues, DLQ and retry policy idempotently on every
+  # `compose up`, then exits 0. Guards the partition count against accidental
+  # change — see infra/rabbitmq/declare-topology.sh.
+  mq-topology:
+    image: curlimages/curl:8.10.1
+    container_name: geofence-mq-topology
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RABBITMQ_USER: ${RABBITMQ_USER:-geofence}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-geofence}
+      MQ_PARTITION_COUNT: ${MQ_PARTITION_COUNT:-8}
+      MQ_DELIVERY_LIMIT: ${MQ_DELIVERY_LIMIT:-5}
+    volumes:
+      - ./infra/rabbitmq/declare-topology.sh:/declare-topology.sh:ro
+    entrypoint: ['sh', '/declare-topology.sh']
+    restart: 'no'
+
 volumes:
   postgres-data:
+  rabbitmq-data:

@@ -79,7 +79,7 @@ npm run build        # nest build + tsc-alias (prod path-alias rewrite)
 npm run lint         # type-checked ESLint; ~6 s warm, ~13 s cold (re-measured after the repo left OneDrive; was ~60 s there)
 npm test
 npm run test:e2e     # needs compose up + healthy
-docker compose ps    # the postgres container "(healthy)"
+docker compose ps    # postgres, redis, rabbitmq all "(healthy)"; mq-topology "Exited (0)"
 ```
 
 For config/bootstrap changes, additionally boot the real artifact:

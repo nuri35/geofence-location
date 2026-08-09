@@ -5,7 +5,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![PostGIS](https://img.shields.io/badge/PostGIS-3.4-4169E1)
 ![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
-![RabbitMQ](https://img.shields.io/badge/RabbitMQ-target%20(N4)-FF6600?logo=rabbitmq&logoColor=white)
+![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.13%20(topology%2C%20N4A)-FF6600?logo=rabbitmq&logoColor=white)
 ![TypeORM](https://img.shields.io/badge/TypeORM-0.3-FE0803)
 ![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-161%20passing%20(88%20unit%20%2B%2073%20e2e)-brightgreen)
@@ -295,7 +295,8 @@ the contract send neither field and are processed without deduplication.
 | Language   | TypeScript 5 (strict)                           |
 | Database   | PostgreSQL 16 + PostGIS 3.4 (`postgis/postgis`) |
 | ORM        | TypeORM 0.3 (DataSource + migrations, no sync)  |
-| Cache      | None — a Redis presence cache was evaluated by measurement and removed (ADR 0007) |
+| Cache      | Redis 7 — presence cache behind the no-change fast path (ADR 0013; first attempt was measured and removed under the old shape, ADR 0007) |
+| Queue      | RabbitMQ 3.13 + consistent-hash exchange — topology only as of N4A; nothing publishes or consumes yet (ADR 0014) |
 | Validation | class-validator / class-transformer, Joi (env)  |
 | Testing    | Jest 29, Supertest (e2e, dedicated test DB)     |
 | Local infra| Docker Compose                                  |
@@ -309,7 +310,7 @@ the contract send neither field and are processed without deduplication.
 
 ```bash
 cp .env.example .env        # defaults work with the compose services as-is
-docker compose up -d        # PostGIS with healthcheck
+docker compose up -d        # PostGIS + Redis + RabbitMQ (healthchecked) + one-shot MQ topology job
 npm install
 npm run migration:run       # PostGIS extension → areas → logs → presence → lock function
 npm run start:dev

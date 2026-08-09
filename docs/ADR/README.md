@@ -15,3 +15,4 @@
 | [0011](0011-partitioned-async-architecture.md) | Partitioned asynchronous architecture (target; phases N2–N6) | Accepted as direction | 2026-08-09 |
 | [0012](0012-in-memory-spatial-index.md) | In-memory spatial index with versioned snapshot (Phase N2) | Accepted | 2026-08-09 |
 | [0013](0013-presence-cache-no-change-fast-path.md) | Redis presence cache with a no-change fast path (Phase N3) | Accepted | 2026-08-09 |
+| [0014](0014-rabbitmq-topology.md) | RabbitMQ topology with consistent-hash partitioning (Phase N4A) | Accepted | 2026-08-09 |
